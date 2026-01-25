@@ -1,16 +1,16 @@
 import flet as ft
 
 def main(page: ft.Page):
-    # --- CONFIGURACIÓN DE PÁGINA ---
-    page.title = "Sistema Restaurante - SUNMI D3 Pro"
+    # --- CONFIGURACIÓN BASE ---
+    page.title = "POS Restaurante - SUNMI D3 Pro"
     page.theme_mode = "light"
     page.padding = 10
     
-    # Proporciones para tu pantalla grande
+    # Proporciones para pantalla de 15.6"
     page.window_width = 1200
     page.window_height = 800
 
-    # Variables de estado
+    # Variables de estado (20 mesas)
     cuentas = {i: [] for i in range(1, 21)}
     estado = {"mesa": 0}
 
@@ -33,26 +33,39 @@ def main(page: ft.Page):
         cuentas[estado["mesa"]].append({"n": nombre, "p": precio, "d": destino})
         refrescar_ticket()
 
+    # Función para quitar un producto por su posición
+    def quitar_item(indice):
+        cuentas[estado["mesa"]].pop(indice)
+        refrescar_ticket()
+
     def refrescar_ticket():
         col_ticket.controls.clear()
         total = 0
-        for item in cuentas[estado["mesa"]]:
+        # Recorremos los productos de la mesa actual
+        for idx, item in enumerate(cuentas[estado["mesa"]]):
             col_ticket.controls.append(
-                ft.Text(f"{item['n']} .... ${item['p']}", size=16)
+                ft.Row([
+                    # Botón de borrar usando Texto para evitar errores de íconos
+                    ft.TextButton(
+                        content=ft.Text(" X ", color="red", weight="bold"),
+                        on_click=lambda e, i=idx: quitar_item(i)
+                    ),
+                    ft.Text(f"{item['n']} .... ${item['p']}", size=16, expand=True)
+                ])
             )
             total += item["p"]
         txt_total.value = f"TOTAL: ${total}"
         page.update()
 
     def procesar_impresion(e):
-        # Simulación de las 3 impresoras en terminal
+        # Simulación de envío a 3 impresoras (Barra, Cocina, Otros)
         print(f"\n--- GENERANDO TICKETS MESA {estado['mesa']} ---")
         for zona in ["BARRA", "COCINA", "OTROS"]:
             items = [i["n"] for i in cuentas[estado["mesa"]] if i["d"] == zona]
             if items:
                 print(f"IMPRIMIENDO EN {zona}: {items}")
         
-        cuentas[estado["mesa"]] = [] # Limpiar mesa
+        cuentas[estado["mesa"]] = [] # Limpiar mesa al cerrar
         ir_a_mesas(None)
 
     # --- DISEÑO VISTA 1: 20 MESAS ---
@@ -63,7 +76,6 @@ def main(page: ft.Page):
                 content=ft.Text(f"{i}", color="white", size=22, weight="bold"),
                 bgcolor="blue",
                 border_radius=10,
-                # Usamos una forma de alineación que no use ft.alignment
                 padding=20,
                 on_click=ir_a_pedido,
                 data=i
@@ -80,7 +92,6 @@ def main(page: ft.Page):
     col_ticket = ft.Column(scroll="always", expand=True)
     txt_total = ft.Text("TOTAL: $0", size=35, weight="bold", color="green")
 
-    # Lista de productos
     MENU = [
         {"n": "Cerveza", "p": 55, "d": "BARRA"},
         {"n": "Refresco", "p": 35, "d": "BARRA"},
@@ -100,17 +111,17 @@ def main(page: ft.Page):
         )
 
     v_pedido = ft.Row([
-        # Lado izquierdo: Selección
+        # Lado izquierdo: Selección de productos
         ft.Column([
             ft.TextButton(content=ft.Text("<- VOLVER"), on_click=ir_a_mesas),
-            grid_prods
+            grid_productos_grid := grid_prods
         ], expand=3),
-        # Lado derecho: Ticket
+        # Lado derecho: Resumen de la cuenta (Ticket)
         ft.Container(
             content=ft.Column([
                 txt_titulo_mesa,
                 ft.Divider(),
-                col_ticket,
+                col_ticket, # Aquí se listan productos con su botón "X"
                 ft.Divider(),
                 txt_total,
                 ft.ElevatedButton(
@@ -125,7 +136,6 @@ def main(page: ft.Page):
         )
     ], expand=True, visible=False)
 
-    # --- CARGA ---
     page.add(ft.Stack([v_mesas, v_pedido], expand=True))
 
 ft.app(target=main)
