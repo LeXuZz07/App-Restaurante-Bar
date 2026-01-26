@@ -8,8 +8,10 @@ def main(page: ft.Page):
     page.window_width = 1200
     page.window_height = 800
 
-    # Variables de estado
+    # --- VARIABLES DE ESTADO (MEMORIA TEMPORAL) ---
     cuentas = {i: [] for i in range(1, 21)}
+    ventas_totales = []  # Historial de ventas cerradas
+    compras_insumos = [] # Historial de gastos/compras
     estado = {"mesa": 0}
 
     MENU = [
@@ -21,10 +23,11 @@ def main(page: ft.Page):
         {"n": "Pastel", "p": 60, "d": "OTROS", "c": "POSTRES"},
     ]
 
-    # --- NAVEGACIÓN ---
+    # --- LÓGICA DE NAVEGACIÓN ---
 
     def ir_a_mesas(e):
         v_pedido.visible = v_confirmacion.visible = v_ticket_final.visible = False
+        v_login.visible = v_admin.visible = False
         v_mesas.visible = True
         for c in grid_mesas.controls:
             c.bgcolor = "orange" if len(cuentas[c.data]) > 0 else "blue"
@@ -39,6 +42,11 @@ def main(page: ft.Page):
         v_pedido.visible = True
         page.update()
 
+    def ir_a_login(e):
+        v_mesas.visible = False
+        v_login.visible = True
+        page.update()
+
     def mostrar_mensaje_central(texto, color_texto):
         grid_prods.controls.clear()
         grid_prods.controls.append(
@@ -47,6 +55,49 @@ def main(page: ft.Page):
                 ft.Row([ft.Text(texto, size=22, color=color_texto, weight="bold", text_align="center")], alignment="center")
             ], horizontal_alignment="center", width=700)
         )
+        page.update()
+
+    # --- LÓGICA DE ADMINISTRACIÓN ---
+
+    def validar_login(e):
+        if user_input.value == "admin" and pass_input.value == "1234":
+            user_input.value = ""
+            pass_input.value = ""
+            v_login.visible = False
+            v_admin.visible = True
+            actualizar_resumen()
+        else:
+            page.snack_bar = ft.SnackBar(ft.Text("Credenciales Incorrectas"), bgcolor="red")
+            page.snack_bar.open = True
+        page.update()
+
+    def registrar_compra(e):
+        if input_gasto_nom.value and input_gasto_monto.value:
+            try:
+                gasto = {
+                    "n": input_gasto_nom.value,
+                    "p": float(input_gasto_monto.value),
+                    "f": datetime.now().strftime("%H:%M")
+                }
+                compras_insumos.append(gasto)
+                input_gasto_nom.value = ""
+                input_gasto_monto.value = ""
+                actualizar_resumen()
+            except ValueError:
+                pass
+        page.update()
+
+    def actualizar_resumen():
+        col_resumen_dia.controls.clear()
+        total_v = sum(v["total"] for v in ventas_totales)
+        total_c = sum(c["p"] for c in compras_insumos)
+        balance = total_v - total_c
+
+        col_resumen_dia.controls.append(ft.Text(f"INGRESOS (VENTAS): ${total_v}", color="green", size=20, weight="bold"))
+        col_resumen_dia.controls.append(ft.Text(f"EGRESOS (COMPRAS): ${total_c}", color="red", size=20, weight="bold"))
+        col_resumen_dia.controls.append(ft.Divider())
+        col_resumen_dia.controls.append(ft.Text(f"BALANCE NETO: ${balance}", size=25, weight="bold", 
+                                               color="blue" if balance >=0 else "red"))
         page.update()
 
     # --- LÓGICA DE PRODUCTOS ---
@@ -77,7 +128,7 @@ def main(page: ft.Page):
         total = 0
         for item in cuentas[estado["mesa"]]:
             subtotal = item["p"] * item["q"]
-            icono = ft.Text(" ✔ ", color="green") if item["enviado"] else ft.TextButton(
+            icono = ft.Text(" ✔ ", color="green", weight="bold") if item["enviado"] else ft.TextButton(
                 content=ft.Text(" X ", color="red", weight="bold"),
                 on_click=lambda e, n=item["n"]: quitar_item(n)
             )
@@ -117,7 +168,6 @@ def main(page: ft.Page):
             mostrar_mensaje_central("AVISO:\nNo hay productos nuevos para enviar.", "orange")
             return
 
-        # LOG DE APERTURA (Si es el primer envío real)
         ya_tenia_enviados = any(i["enviado"] for i in mesa_actual)
         if not ya_tenia_enviados:
             print("\n" + "*"*50)
@@ -125,7 +175,6 @@ def main(page: ft.Page):
             print(f" [!] HORA DE APERTURA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             print("*"*50)
 
-        # LOG DE COMANDA
         print(f"[*] ENVIANDO COMANDA NUEVA - MESA {estado['mesa']}")
         for zona in ["BARRA", "COCINA", "OTROS"]:
             items = [f"{i['q']}x {i['n']}" for i in productos_nuevos if i["d"] == zona]
@@ -141,14 +190,9 @@ def main(page: ft.Page):
             mostrar_mensaje_central("ERROR:\nLa cuenta está vacía.", "red")
             return
 
-        # VALIDACIÓN CRÍTICA: ¿Hay productos con la 'X' roja?
         hay_pendientes = any(not i["enviado"] for i in mesa_actual)
         if hay_pendientes:
-            mostrar_mensaje_central(
-                "ADVERTENCIA:\nHay productos sin enviar a cocina.\nPor favor, presiona 'ENVIAR COMANDA' primero.", 
-                "red"
-            )
-            print(f"[!] BLOQUEO: Intento de pago con productos pendientes en Mesa {estado['mesa']}")
+            mostrar_mensaje_central("ADVERTENCIA:\nHay productos sin enviar a cocina.\nPresiona 'ENVIAR COMANDA' primero.", "red")
             return
             
         v_confirmacion.visible = True
@@ -167,10 +211,12 @@ def main(page: ft.Page):
         page.update()
 
     def finalizar_y_limpiar(e):
-        # LOG DE CIERRE
+        total_venta = sum(i["p"] * i["q"] for i in cuentas[estado["mesa"]])
+        ventas_totales.append({"total": total_venta, "fecha": datetime.now().strftime("%H:%M")})
+
         print("\n" + "!"*45)
         print(f" REPORTE DE CIERRE DE CUENTA")
-        print(f" MESA: {estado['mesa']}")
+        print(f" MESA: {estado['mesa']} | TOTAL: ${total_venta}")
         print(f" FECHA Y HORA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f" ESTADO: CUENTA CERRADA Y MESA LIBERADA")
         print("!"*45 + "\n")
@@ -179,19 +225,63 @@ def main(page: ft.Page):
         ir_a_mesas(None)
 
     # --- INTERFACES ---
+
+    # VISTA LOGIN (Sin iconos)
+    user_input = ft.TextField(label="Usuario", width=300)
+    pass_input = ft.TextField(label="Contraseña", password=True, width=300)
+    v_login = ft.Container(
+        content=ft.Column([
+            ft.Text("ACCESO ADMIN", size=30, weight="bold"),
+            user_input, pass_input,
+            ft.ElevatedButton("ENTRAR", on_click=validar_login, bgcolor="blue", color="white", width=300),
+            ft.TextButton("VOLVER AL SALÓN", on_click=ir_a_mesas)
+        ], alignment="center", horizontal_alignment="center"),
+        visible=False, expand=True
+    )
+
+    # VISTA DASHBOARD (Botón cerrar manual)
+    col_resumen_dia = ft.Column()
+    input_gasto_nom = ft.TextField(label="Insumo/Concepto", expand=True)
+    input_gasto_monto = ft.TextField(label="Costo $", width=120)
+    v_admin = ft.Container(
+        content=ft.Column([
+            ft.Row([
+                ft.Text("PANEL ADMINISTRATIVO", size=30, weight="bold"), 
+                ft.TextButton("CERRAR PANEL", on_click=ir_a_mesas)
+            ], alignment="spaceBetween"),
+            ft.Divider(),
+            ft.Row([
+                ft.Column([ft.Text("BALANCE GENERAL", size=22, weight="bold"), col_resumen_dia], expand=1),
+                ft.VerticalDivider(),
+                ft.Column([
+                    ft.Text("REGISTRAR GASTO", size=22, weight="bold"),
+                    ft.Row([input_gasto_nom, input_gasto_monto]),
+                    ft.ElevatedButton("GUARDAR COMPRA", on_click=registrar_compra, bgcolor="red", color="white")
+                ], expand=1)
+            ], expand=True)
+        ]),
+        visible=False, expand=True, padding=30
+    )
+
+    # VISTA SALÓN (Botón Admin por texto)
     grid_mesas = ft.GridView(expand=True, runs_count=5, spacing=15)
     for i in range(1, 21):
         grid_mesas.controls.append(
             ft.Container(content=ft.Text(f"{i}", color="white", size=22, weight="bold"),
                         bgcolor="blue", border_radius=10, padding=20, on_click=ir_a_pedido, data=i))
-    
-    v_mesas = ft.Column([ft.Text("SALÓN DE MESAS", size=30, weight="bold"), grid_mesas], expand=True)
+    v_mesas = ft.Column([
+        ft.Row([
+            ft.Text("SISTEMA POS - SALÓN", size=30, weight="bold", expand=True),
+            ft.TextButton("ADMIN", on_click=ir_a_login)
+        ]), 
+        grid_mesas
+    ], expand=True)
 
+    # VISTA PEDIDO
     txt_titulo_mesa = ft.Text("", size=25, weight="bold")
     col_ticket = ft.Column(scroll="always", expand=True)
     txt_total = ft.Text("TOTAL: $0", size=35, weight="bold", color="green")
     grid_prods = ft.Column(expand=True) 
-
     btn_categorias = ft.Row([
         ft.ElevatedButton("BEBIDAS", on_click=lambda _: filtrar_menu("BEBIDAS")),
         ft.ElevatedButton("COMIDA", on_click=lambda _: filtrar_menu("COMIDA")),
@@ -203,14 +293,15 @@ def main(page: ft.Page):
         ft.Container(
             content=ft.Column([
                 txt_titulo_mesa, ft.Divider(), col_ticket, ft.Divider(), txt_total,
-                ft.ElevatedButton("ENVIAR COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda),
+                ft.ElevatedButton("ENVIAR COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400),
                 ft.Container(height=5),
-                ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=abrir_confirmacion),
+                ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=abrir_confirmacion, width=400),
             ]),
             expand=2, bgcolor="white", padding=20, border_radius=15
         )
     ], expand=True, visible=False)
 
+    # OVERLAYS
     v_confirmacion = ft.Container(
         content=ft.Column([
             ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"),
@@ -236,6 +327,6 @@ def main(page: ft.Page):
         bgcolor="white", visible=False, expand=True, padding=50
     )
 
-    page.add(ft.Stack([v_mesas, v_pedido, v_confirmacion, v_ticket_final], expand=True))
+    page.add(ft.Stack([v_mesas, v_pedido, v_confirmacion, v_ticket_final, v_login, v_admin], expand=True))
 
 ft.app(target=main)
