@@ -2,7 +2,7 @@ import flet as ft
 from datetime import datetime
 
 def main(page: ft.Page):
-    # --- CONFIGURACIÓN BASE (ESTABLE PARA SUNMI D3) ---
+    # --- CONFIGURACIÓN BASE ---
     page.title = "POS Restaurante Pro - SUNMI D3"
     page.theme_mode = "light"
     page.window_width = 1200
@@ -11,7 +11,7 @@ def main(page: ft.Page):
     # --- VARIABLES DE ESTADO ---
     cuentas = {i: [] for i in range(1, 21)}
     ventas_totales = []  
-    compras_insumos = [] # Ahora incluirá cantidades
+    compras_insumos = [] 
     estado = {"mesa": 0}
 
     MENU = [
@@ -23,7 +23,7 @@ def main(page: ft.Page):
         {"n": "Pastel", "p": 60, "d": "OTROS", "c": "POSTRES"},
     ]
 
-    # --- LÓGICA DE NAVEGACIÓN ---
+    # --- NAVEGACIÓN ---
 
     def ir_a_mesas(e):
         v_pedido.visible = v_confirmacion.visible = v_ticket_final.visible = False
@@ -57,7 +57,7 @@ def main(page: ft.Page):
         )
         page.update()
 
-    # --- LÓGICA DE ADMINISTRACIÓN (INVENTARIO MEJORADO) ---
+    # --- LÓGICA DE ADMINISTRACIÓN (CON FECHAS) ---
 
     def validar_login(e):
         if user_input.value == "admin" and pass_input.value == "1234":
@@ -72,17 +72,15 @@ def main(page: ft.Page):
         page.update()
 
     def registrar_compra(e):
-        # Validamos que los campos tengan datos
         if input_gasto_nom.value and input_gasto_monto.value and input_gasto_cant.value:
             try:
                 gasto = {
                     "n": input_gasto_nom.value,
-                    "q": int(input_gasto_cant.value), # Guardamos cantidad
-                    "p": float(input_gasto_monto.value), # Costo total del lote
-                    "f": datetime.now().strftime("%H:%M")
+                    "q": int(input_gasto_cant.value),
+                    "p": float(input_gasto_monto.value),
+                    "f": datetime.now().strftime("%Y-%m-%d %H:%M") # Fecha y hora de compra
                 }
                 compras_insumos.append(gasto)
-                # Limpiar campos
                 input_gasto_nom.value = ""
                 input_gasto_cant.value = "1"
                 input_gasto_monto.value = ""
@@ -95,20 +93,22 @@ def main(page: ft.Page):
         col_resumen_balance.controls.clear()
         col_lista_compras.controls.clear()
         
+        hoy = datetime.now().strftime("%Y-%m-%d")
         total_v = sum(v["total"] for v in ventas_totales)
         total_c = sum(c["p"] for c in compras_insumos)
         balance = total_v - total_c
 
-        # 1. Mostrar Totales
+        # 1. Encabezado de Balance con Fecha
+        col_resumen_balance.controls.append(ft.Text(f"FECHA DE CORTE: {hoy}", size=16, weight="bold", color="grey"))
         col_resumen_balance.controls.append(ft.Text(f"INGRESOS: ${total_v}", color="green", size=20, weight="bold"))
         col_resumen_balance.controls.append(ft.Text(f"EGRESOS: ${total_c}", color="red", size=20, weight="bold"))
         col_resumen_balance.controls.append(ft.Divider())
-        col_resumen_balance.controls.append(ft.Text(f"NETO: ${balance}", size=25, weight="bold"))
+        col_resumen_balance.controls.append(ft.Text(f"NETO: ${balance}", size=25, weight="bold", color="blue" if balance >=0 else "red"))
 
-        # 2. Mostrar Historial de Compras/Inventario
+        # 2. Historial de Compras con Fecha
         for c in compras_insumos:
             col_lista_compras.controls.append(
-                ft.Text(f"• {c['q']}x {c['n']} - ${c['p']}", size=16)
+                ft.Text(f"• [{c['f']}] {c['q']}x {c['n']} - ${c['p']}", size=15)
             )
         page.update()
 
@@ -217,7 +217,11 @@ def main(page: ft.Page):
 
     def finalizar_y_limpiar(e):
         total_venta = sum(i["p"] * i["q"] for i in cuentas[estado["mesa"]])
-        ventas_totales.append({"total": total_venta, "fecha": datetime.now().strftime("%H:%M")})
+        # Guardamos la venta con fecha y hora completa
+        ventas_totales.append({
+            "total": total_venta, 
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+        })
 
         print(f"\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n REPORTE DE CIERRE DE CUENTA\n MESA: {estado['mesa']} | TOTAL: ${total_venta}\n FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n ESTADO: LIBERADA\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
         
@@ -226,50 +230,46 @@ def main(page: ft.Page):
 
     # --- INTERFACES ---
 
-    # VISTA LOGIN
-    user_input = ft.TextField(label="Usuario", width=300)
-    pass_input = ft.TextField(label="Contraseña", password=True, width=300)
     v_login = ft.Container(
         content=ft.Column([
             ft.Text("ACCESO ADMIN", size=30, weight="bold"),
-            user_input, pass_input,
+            user_input := ft.TextField(label="Usuario", width=300),
+            pass_input := ft.TextField(label="Contraseña", password=True, width=300),
             ft.ElevatedButton("ENTRAR", on_click=validar_login, bgcolor="blue", color="white", width=300),
             ft.TextButton("VOLVER AL SALÓN", on_click=ir_a_mesas)
         ], alignment="center", horizontal_alignment="center"),
         visible=False, expand=True
     )
 
-    # VISTA DASHBOARD (HISTORIAL DE INVENTARIO)
     col_resumen_balance = ft.Column()
     col_lista_compras = ft.Column(scroll="always", expand=True)
-    input_gasto_nom = ft.TextField(label="Producto/Insumo", expand=True)
-    input_gasto_cant = ft.TextField(label="Cant.", width=80, value="1")
-    input_gasto_monto = ft.TextField(label="Costo Total $", width=140)
-    
     v_admin = ft.Container(
         content=ft.Column([
             ft.Row([ft.Text("PANEL ADMINISTRATIVO", size=30, weight="bold"), ft.TextButton("CERRAR", on_click=ir_a_mesas)], alignment="spaceBetween"),
             ft.Divider(),
             ft.Row([
                 ft.Column([
-                    ft.Text("BALANCE", size=22, weight="bold"),
+                    ft.Text("RESUMEN DE GANANCIAS", size=22, weight="bold"),
                     col_resumen_balance,
                     ft.Divider(),
-                    ft.Text("HISTORIAL DE COMPRAS", size=18, weight="bold"),
+                    ft.Text("HISTORIAL DE INVENTARIO", size=18, weight="bold"),
                     col_lista_compras
                 ], expand=1),
                 ft.VerticalDivider(),
                 ft.Column([
-                    ft.Text("REGISTRAR ENTRADA DE INVENTARIO", size=22, weight="bold"),
-                    ft.Row([input_gasto_nom, input_gasto_cant, input_gasto_monto]),
-                    ft.ElevatedButton("GUARDAR EN INVENTARIO", on_click=registrar_compra, bgcolor="red", color="white", width=400)
+                    ft.Text("REGISTRAR COMPRA", size=22, weight="bold"),
+                    ft.Row([
+                        input_gasto_nom := ft.TextField(label="Producto", expand=True),
+                        input_gasto_cant := ft.TextField(label="Cant.", width=80, value="1"),
+                        input_gasto_monto := ft.TextField(label="Costo Total $", width=140)
+                    ]),
+                    ft.ElevatedButton("GUARDAR EN HISTORIAL", on_click=registrar_compra, bgcolor="red", color="white", width=400)
                 ], expand=1)
             ], expand=True)
         ]),
         visible=False, expand=True, padding=30
     )
 
-    # VISTA SALÓN
     grid_mesas = ft.GridView(expand=True, runs_count=5, spacing=15)
     for i in range(1, 21):
         grid_mesas.controls.append(
@@ -280,19 +280,17 @@ def main(page: ft.Page):
         grid_mesas
     ], expand=True)
 
-    # VISTA PEDIDO
     txt_titulo_mesa = ft.Text("", size=25, weight="bold")
     col_ticket = ft.Column(scroll="always", expand=True)
     txt_total = ft.Text("TOTAL: $0", size=35, weight="bold", color="green")
     grid_prods = ft.Column(expand=True) 
-    btn_categorias = ft.Row([
-        ft.ElevatedButton("BEBIDAS", on_click=lambda _: filtrar_menu("BEBIDAS")),
-        ft.ElevatedButton("COMIDA", on_click=lambda _: filtrar_menu("COMIDA")),
-        ft.ElevatedButton("POSTRES", on_click=lambda _: filtrar_menu("POSTRES")),
-    ])
-
     v_pedido = ft.Row([
-        ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), btn_categorias, grid_prods], expand=3),
+        ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), 
+                   ft.Row([
+                       ft.ElevatedButton("BEBIDAS", on_click=lambda _: filtrar_menu("BEBIDAS")),
+                       ft.ElevatedButton("COMIDA", on_click=lambda _: filtrar_menu("COMIDA")),
+                       ft.ElevatedButton("POSTRES", on_click=lambda _: filtrar_menu("POSTRES")),
+                   ]), grid_prods], expand=3),
         ft.Container(
             content=ft.Column([
                 txt_titulo_mesa, ft.Divider(), col_ticket, ft.Divider(), txt_total,
