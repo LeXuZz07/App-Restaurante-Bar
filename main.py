@@ -2,16 +2,16 @@ import flet as ft
 from datetime import datetime
 
 def main(page: ft.Page):
-    # --- CONFIGURACIÓN BASE ---
+    # --- CONFIGURACIÓN BASE (ESTABLE PARA SUNMI D3) ---
     page.title = "POS Restaurante Pro - SUNMI D3"
     page.theme_mode = "light"
     page.window_width = 1200
     page.window_height = 800
 
-    # --- VARIABLES DE ESTADO (MEMORIA TEMPORAL) ---
+    # --- VARIABLES DE ESTADO ---
     cuentas = {i: [] for i in range(1, 21)}
-    ventas_totales = []  # Historial de ventas cerradas
-    compras_insumos = [] # Historial de gastos/compras
+    ventas_totales = []  
+    compras_insumos = [] # Ahora incluirá cantidades
     estado = {"mesa": 0}
 
     MENU = [
@@ -57,7 +57,7 @@ def main(page: ft.Page):
         )
         page.update()
 
-    # --- LÓGICA DE ADMINISTRACIÓN ---
+    # --- LÓGICA DE ADMINISTRACIÓN (INVENTARIO MEJORADO) ---
 
     def validar_login(e):
         if user_input.value == "admin" and pass_input.value == "1234":
@@ -72,15 +72,19 @@ def main(page: ft.Page):
         page.update()
 
     def registrar_compra(e):
-        if input_gasto_nom.value and input_gasto_monto.value:
+        # Validamos que los campos tengan datos
+        if input_gasto_nom.value and input_gasto_monto.value and input_gasto_cant.value:
             try:
                 gasto = {
                     "n": input_gasto_nom.value,
-                    "p": float(input_gasto_monto.value),
+                    "q": int(input_gasto_cant.value), # Guardamos cantidad
+                    "p": float(input_gasto_monto.value), # Costo total del lote
                     "f": datetime.now().strftime("%H:%M")
                 }
                 compras_insumos.append(gasto)
+                # Limpiar campos
                 input_gasto_nom.value = ""
+                input_gasto_cant.value = "1"
                 input_gasto_monto.value = ""
                 actualizar_resumen()
             except ValueError:
@@ -88,16 +92,24 @@ def main(page: ft.Page):
         page.update()
 
     def actualizar_resumen():
-        col_resumen_dia.controls.clear()
+        col_resumen_balance.controls.clear()
+        col_lista_compras.controls.clear()
+        
         total_v = sum(v["total"] for v in ventas_totales)
         total_c = sum(c["p"] for c in compras_insumos)
         balance = total_v - total_c
 
-        col_resumen_dia.controls.append(ft.Text(f"INGRESOS (VENTAS): ${total_v}", color="green", size=20, weight="bold"))
-        col_resumen_dia.controls.append(ft.Text(f"EGRESOS (COMPRAS): ${total_c}", color="red", size=20, weight="bold"))
-        col_resumen_dia.controls.append(ft.Divider())
-        col_resumen_dia.controls.append(ft.Text(f"BALANCE NETO: ${balance}", size=25, weight="bold", 
-                                               color="blue" if balance >=0 else "red"))
+        # 1. Mostrar Totales
+        col_resumen_balance.controls.append(ft.Text(f"INGRESOS: ${total_v}", color="green", size=20, weight="bold"))
+        col_resumen_balance.controls.append(ft.Text(f"EGRESOS: ${total_c}", color="red", size=20, weight="bold"))
+        col_resumen_balance.controls.append(ft.Divider())
+        col_resumen_balance.controls.append(ft.Text(f"NETO: ${balance}", size=25, weight="bold"))
+
+        # 2. Mostrar Historial de Compras/Inventario
+        for c in compras_insumos:
+            col_lista_compras.controls.append(
+                ft.Text(f"• {c['q']}x {c['n']} - ${c['p']}", size=16)
+            )
         page.update()
 
     # --- LÓGICA DE PRODUCTOS ---
@@ -163,38 +175,31 @@ def main(page: ft.Page):
     def enviar_comanda(e):
         mesa_actual = cuentas[estado["mesa"]]
         productos_nuevos = [i for i in mesa_actual if not i["enviado"]]
-        
         if not productos_nuevos:
             mostrar_mensaje_central("AVISO:\nNo hay productos nuevos para enviar.", "orange")
             return
 
         ya_tenia_enviados = any(i["enviado"] for i in mesa_actual)
         if not ya_tenia_enviados:
-            print("\n" + "*"*50)
-            print(f" [!] ESTADO: MESA {estado['mesa']} OCUPADA")
-            print(f" [!] HORA DE APERTURA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            print("*"*50)
+            print(f"\n**************************************************\n [!] ESTADO: MESA {estado['mesa']} OCUPADA\n [!] APERTURA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n**************************************************")
 
-        print(f"[*] ENVIANDO COMANDA NUEVA - MESA {estado['mesa']}")
+        print(f"[*] ENVIANDO COMANDA MESA {estado['mesa']}")
         for zona in ["BARRA", "COCINA", "OTROS"]:
             items = [f"{i['q']}x {i['n']}" for i in productos_nuevos if i["d"] == zona]
             if items: print(f"    -> {zona}: {', '.join(items)}")
         
         for i in mesa_actual: i["enviado"] = True
         refrescar_ticket()
-        mostrar_mensaje_central("¡COMANDA ENVIADA!\nLos productos han sido bloqueados.", "green")
+        mostrar_mensaje_central("¡ORDEN ENVIADA!\nLos productos han sido bloqueados.", "green")
 
     def abrir_confirmacion(e):
         mesa_actual = cuentas[estado["mesa"]]
         if not mesa_actual:
             mostrar_mensaje_central("ERROR:\nLa cuenta está vacía.", "red")
             return
-
-        hay_pendientes = any(not i["enviado"] for i in mesa_actual)
-        if hay_pendientes:
-            mostrar_mensaje_central("ADVERTENCIA:\nHay productos sin enviar a cocina.\nPresiona 'ENVIAR COMANDA' primero.", "red")
+        if any(not i["enviado"] for i in mesa_actual):
+            mostrar_mensaje_central("ADVERTENCIA:\nHay productos sin enviar a cocina.", "red")
             return
-            
         v_confirmacion.visible = True
         page.update()
 
@@ -214,19 +219,14 @@ def main(page: ft.Page):
         total_venta = sum(i["p"] * i["q"] for i in cuentas[estado["mesa"]])
         ventas_totales.append({"total": total_venta, "fecha": datetime.now().strftime("%H:%M")})
 
-        print("\n" + "!"*45)
-        print(f" REPORTE DE CIERRE DE CUENTA")
-        print(f" MESA: {estado['mesa']} | TOTAL: ${total_venta}")
-        print(f" FECHA Y HORA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f" ESTADO: CUENTA CERRADA Y MESA LIBERADA")
-        print("!"*45 + "\n")
+        print(f"\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n REPORTE DE CIERRE DE CUENTA\n MESA: {estado['mesa']} | TOTAL: ${total_venta}\n FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n ESTADO: LIBERADA\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
         
         cuentas[estado["mesa"]] = [] 
         ir_a_mesas(None)
 
     # --- INTERFACES ---
 
-    # VISTA LOGIN (Sin iconos)
+    # VISTA LOGIN
     user_input = ft.TextField(label="Usuario", width=300)
     pass_input = ft.TextField(label="Contraseña", password=True, width=300)
     v_login = ft.Container(
@@ -239,41 +239,44 @@ def main(page: ft.Page):
         visible=False, expand=True
     )
 
-    # VISTA DASHBOARD (Botón cerrar manual)
-    col_resumen_dia = ft.Column()
-    input_gasto_nom = ft.TextField(label="Insumo/Concepto", expand=True)
-    input_gasto_monto = ft.TextField(label="Costo $", width=120)
+    # VISTA DASHBOARD (HISTORIAL DE INVENTARIO)
+    col_resumen_balance = ft.Column()
+    col_lista_compras = ft.Column(scroll="always", expand=True)
+    input_gasto_nom = ft.TextField(label="Producto/Insumo", expand=True)
+    input_gasto_cant = ft.TextField(label="Cant.", width=80, value="1")
+    input_gasto_monto = ft.TextField(label="Costo Total $", width=140)
+    
     v_admin = ft.Container(
         content=ft.Column([
-            ft.Row([
-                ft.Text("PANEL ADMINISTRATIVO", size=30, weight="bold"), 
-                ft.TextButton("CERRAR PANEL", on_click=ir_a_mesas)
-            ], alignment="spaceBetween"),
+            ft.Row([ft.Text("PANEL ADMINISTRATIVO", size=30, weight="bold"), ft.TextButton("CERRAR", on_click=ir_a_mesas)], alignment="spaceBetween"),
             ft.Divider(),
             ft.Row([
-                ft.Column([ft.Text("BALANCE GENERAL", size=22, weight="bold"), col_resumen_dia], expand=1),
+                ft.Column([
+                    ft.Text("BALANCE", size=22, weight="bold"),
+                    col_resumen_balance,
+                    ft.Divider(),
+                    ft.Text("HISTORIAL DE COMPRAS", size=18, weight="bold"),
+                    col_lista_compras
+                ], expand=1),
                 ft.VerticalDivider(),
                 ft.Column([
-                    ft.Text("REGISTRAR GASTO", size=22, weight="bold"),
-                    ft.Row([input_gasto_nom, input_gasto_monto]),
-                    ft.ElevatedButton("GUARDAR COMPRA", on_click=registrar_compra, bgcolor="red", color="white")
+                    ft.Text("REGISTRAR ENTRADA DE INVENTARIO", size=22, weight="bold"),
+                    ft.Row([input_gasto_nom, input_gasto_cant, input_gasto_monto]),
+                    ft.ElevatedButton("GUARDAR EN INVENTARIO", on_click=registrar_compra, bgcolor="red", color="white", width=400)
                 ], expand=1)
             ], expand=True)
         ]),
         visible=False, expand=True, padding=30
     )
 
-    # VISTA SALÓN (Botón Admin por texto)
+    # VISTA SALÓN
     grid_mesas = ft.GridView(expand=True, runs_count=5, spacing=15)
     for i in range(1, 21):
         grid_mesas.controls.append(
             ft.Container(content=ft.Text(f"{i}", color="white", size=22, weight="bold"),
                         bgcolor="blue", border_radius=10, padding=20, on_click=ir_a_pedido, data=i))
     v_mesas = ft.Column([
-        ft.Row([
-            ft.Text("SISTEMA POS - SALÓN", size=30, weight="bold", expand=True),
-            ft.TextButton("ADMIN", on_click=ir_a_login)
-        ]), 
+        ft.Row([ft.Text("SISTEMA POS - SALÓN", size=30, weight="bold", expand=True), ft.TextButton("ADMIN", on_click=ir_a_login)]), 
         grid_mesas
     ], expand=True)
 
@@ -301,7 +304,6 @@ def main(page: ft.Page):
         )
     ], expand=True, visible=False)
 
-    # OVERLAYS
     v_confirmacion = ft.Container(
         content=ft.Column([
             ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"),
@@ -318,10 +320,7 @@ def main(page: ft.Page):
     v_ticket_final = ft.Container(
         content=ft.Column([
             ft.Text("RESUMEN DE VENTA", size=30, weight="bold"),
-            ft.Divider(),
-            col_resumen_final,
-            ft.Divider(),
-            txt_total_final,
+            ft.Divider(), col_resumen_final, ft.Divider(), txt_total_final,
             ft.ElevatedButton("FINALIZAR", bgcolor="blue", color="white", width=400, height=80, on_click=finalizar_y_limpiar)
         ], horizontal_alignment="center"),
         bgcolor="white", visible=False, expand=True, padding=50
