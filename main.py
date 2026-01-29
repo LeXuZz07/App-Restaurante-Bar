@@ -6,8 +6,16 @@ from datetime import datetime
 def init_db():
     conn = sqlite3.connect("pos_restaurante.db")
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, total REAL, fecha TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS compras (id INTEGER PRIMARY KEY AUTOINCREMENT, producto TEXT, cantidad INTEGER, costo REAL, fecha TEXT)")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ventas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mesa_id INTEGER,
+            detalle TEXT,
+            total REAL,
+            fecha TEXT,
+            cerrada INTEGER DEFAULT 0
+        )
+    """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS items_activos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,6 +71,30 @@ def db_limpiar_mesa(mesa):
     conn.commit()
     conn.close()
 
+def db_registrar_venta_final(mesa_id, detalle, total):
+    conn = sqlite3.connect("pos_restaurante.db")
+    cursor = conn.cursor()
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
+    cursor.execute("INSERT INTO ventas (mesa_id, detalle, total, fecha, cerrada) VALUES (?, ?, ?, ?, 0)", 
+                   (mesa_id, detalle, total, ahora))
+    conn.commit()
+    conn.close()
+
+def db_ejecutar_cierre_caja():
+    conn = sqlite3.connect("pos_restaurante.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE ventas SET cerrada = 1 WHERE cerrada = 0")
+    conn.commit()
+    conn.close()
+
+def db_obtener_ventas_activas():
+    conn = sqlite3.connect("pos_restaurante.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT mesa_id, detalle, total, fecha FROM ventas WHERE cerrada = 0")
+    datos = cursor.fetchall()
+    conn.close()
+    return datos
+
 def db_cargar_estado_inicial():
     conn = sqlite3.connect("pos_restaurante.db")
     cursor = conn.cursor()
@@ -81,7 +113,6 @@ def main(page: ft.Page):
     page.theme_mode = "light"
     page.padding = 0
 
-    # Estado: Carga desde DB para persistencia
     cuentas = db_cargar_estado_inicial()
     estado = {"mesa": 0}
 
@@ -98,9 +129,12 @@ def main(page: ft.Page):
     def ocultar_todo():
         v_mesas.visible = v_pedido.visible = v_login.visible = False
         v_admin.visible = v_confirmacion.visible = v_ticket_final.visible = False
+        v_confirm_cierre.visible = v_resumen_cierre.visible = False
 
     def ir_a_mesas(e):
         ocultar_todo()
+        user_input.value = ""
+        pass_input.value = ""
         v_mesas.visible = True
         for c in grid_mesas.controls:
             c.bgcolor = "orange" if len(cuentas[c.data]) > 0 else "blue"
@@ -111,19 +145,21 @@ def main(page: ft.Page):
         estado["mesa"] = e.control.data
         txt_titulo_mesa.value = f"MESA #{estado['mesa']}"
         v_pedido.visible = True
-        mostrar_mensaje_central("¡Bienvenido!\nSelecciona una categoría arriba.", "blue")
+        mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
         refrescar_ticket()
         page.update()
 
     def ir_a_login(e):
         ocultar_todo()
+        user_input.value = ""
+        pass_input.value = ""
         v_login.visible = True
         page.update()
 
     def ir_a_admin(e):
         ocultar_todo()
         v_admin.visible = True
-        actualizar_resumen()
+        actualizar_reporte_admin()
         page.update()
 
     def mostrar_mensaje_central(texto, color_texto):
@@ -139,34 +175,47 @@ def main(page: ft.Page):
     # --- LÓGICA DE ADMINISTRACIÓN ---
     def validar_login(e):
         if user_input.value == "admin" and pass_input.value == "1234":
-            user_input.value = ""; pass_input.value = ""; ir_a_admin(None)
+            ir_a_admin(None)
         else:
             page.snack_bar = ft.SnackBar(ft.Text("Credenciales Incorrectas"), bgcolor="red")
-            page.snack_bar.open = True; page.update()
-
-    def registrar_compra(e):
-        if input_gasto_nom.value and input_gasto_monto.value:
-            try:
-                conn = sqlite3.connect("pos_restaurante.db")
-                conn.execute("INSERT INTO compras (producto, cantidad, costo, fecha) VALUES (?,?,?,?)",
-                             (input_gasto_nom.value, int(input_gasto_cant.value), float(input_gasto_monto.value), datetime.now().strftime("%Y-%m-%d %H:%M")))
-                conn.commit(); conn.close()
-                input_gasto_nom.value = ""; input_gasto_monto.value = ""; actualizar_resumen()
-            except: pass
+            page.snack_bar.open = True
         page.update()
 
-    def actualizar_resumen():
-        conn = sqlite3.connect("pos_restaurante.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT SUM(total) FROM ventas"); ingresos = cursor.fetchone()[0] or 0.0
-        cursor.execute("SELECT SUM(costo) FROM compras"); egresos = cursor.fetchone()[0] or 0.0
-        cursor.execute("SELECT fecha, cantidad, producto, costo FROM compras ORDER BY id DESC LIMIT 10")
-        hist = cursor.fetchall(); conn.close()
-        col_resumen_balance.controls.clear(); col_lista_compras.controls.clear()
-        col_resumen_balance.controls.append(ft.Text(f"INGRESOS: ${ingresos}", color="green", size=20, weight="bold"))
-        col_resumen_balance.controls.append(ft.Text(f"EGRESOS: ${egresos}", color="red", size=20, weight="bold"))
-        col_resumen_balance.controls.append(ft.Text(f"NETO: ${ingresos-egresos}", size=25, weight="bold"))
-        for f, q, n, p in hist: col_lista_compras.controls.append(ft.Text(f"• [{f}] {q}x {n} - ${p}"))
+    def actualizar_reporte_admin():
+        ventas_activas = db_obtener_ventas_activas()
+        col_reportes_dia.controls.clear()
+        total_acumulado = 0
+        for m_id, detalle, total, fecha in ventas_activas:
+            total_acumulado += total
+            col_reportes_dia.controls.append(
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text(f"MESA {m_id}", weight="bold", size=18),
+                        ft.Text("Productos pedidos:"),
+                        ft.Text(detalle, color="grey", italic=True),
+                        ft.Row([
+                            ft.Text(f"Total ingresado: ${total}", weight="bold", color="green"),
+                            ft.Text(f"Pago: {fecha}", size=12, color="grey")
+                        ], alignment="spaceBetween")
+                    ]), padding=15, border=ft.border.all(1, "grey"), border_radius=10, margin=ft.margin.only(bottom=10)
+                )
+            )
+        txt_ingreso_total_dia.value = f"TOTAL INGRESADO HOY: ${total_acumulado}"
+        page.update()
+
+    def abrir_confirmacion_cierre(e):
+        v_confirm_cierre.visible = True
+        page.update()
+
+    def ejecutar_cierre_final(e):
+        ventas = db_obtener_ventas_activas()
+        total_final = sum(v[2] for v in ventas)
+        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+        db_ejecutar_cierre_caja()
+        v_confirm_cierre.visible = False
+        txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_final}"
+        txt_resumen_cierre_fecha.value = f"FECHA: {fecha_hoy}"
+        v_resumen_cierre.visible = True
         page.update()
 
     # --- LÓGICA DE PEDIDOS ---
@@ -212,15 +261,18 @@ def main(page: ft.Page):
                     on_click=lambda e, n=p['n'], pr=p['p'], d=p['d']: agregar_item(n, pr, d), height=80))
         grid_prods.controls.append(btns); page.update()
 
-    # --- COMANDAS Y CIERRES (CORRECCIÓN: Aviso restaurado) ---
+    # --- COMANDAS Y LOGS (RESTAURADOS) ---
     def enviar_comanda(e):
         nuevos = [i for i in cuentas[estado["mesa"]] if not i["enviado"]]
-        if not nuevos: # <--- RESTAURADO: Mensaje de advertencia
+        if not nuevos:
             mostrar_mensaje_central("AVISO:\nNo hay productos nuevos para enviar.", "orange")
             return
         
         if not any(i["enviado"] for i in cuentas[estado["mesa"]]):
-            print(f"\n**************************************************\n [!] ESTADO: MESA {estado['mesa']} OCUPADA\n [!] APERTURA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n" + "*"*50)
+            print(f"\n**************************************************")
+            print(f" [!] ESTADO: MESA {estado['mesa']} OCUPADA")
+            print(f" [!] APERTURA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"**************************************************")
 
         db_marcar_enviados(estado["mesa"])
         for i in cuentas[estado["mesa"]]: i["enviado"] = True
@@ -233,51 +285,89 @@ def main(page: ft.Page):
         refrescar_ticket(); mostrar_mensaje_central("¡ORDEN ENVIADA!", "green")
 
     def abrir_confirmacion(e):
-        if not cuentas[estado["mesa"]]:
+        m_actual = cuentas[estado["mesa"]]
+        if not m_actual:
             mostrar_mensaje_central("ERROR:\nLa cuenta está vacía.", "red"); return
-        if any(not i["enviado"] for i in cuentas[estado["mesa"]]):
+        if any(not i["enviado"] for i in m_actual):
             mostrar_mensaje_central("ADVERTENCIA:\nEnvía la comanda primero.", "red"); return
         v_confirmacion.visible = True; page.update()
 
-    def mostrar_ticket_final(e): # <--- Restaurado: Llena resumen
+    def mostrar_ticket_final(e):
         col_resumen_final.controls.clear()
         total = 0
         for i in cuentas[estado["mesa"]]:
             sub = i['p'] * i['q']
             col_resumen_final.controls.append(ft.Text(f"{i['q']} x {i['n']} .... ${sub}", size=18))
             total += sub
-        txt_total_final.value = f"TOTAL: ${total}"
+        txt_total_final.value = f"TOTAL FINAL: ${total}"
         v_confirmacion.visible = False; v_ticket_final.visible = True; page.update()
 
-    def finalizar_y_limpiar(e):
-        total = sum(i["p"] * i["q"] for i in cuentas[estado["mesa"]])
-        conn = sqlite3.connect("pos_restaurante.db")
-        conn.execute("INSERT INTO ventas (total, fecha) VALUES (?,?)", (total, datetime.now().strftime("%Y-%m-%d %H:%M")))
-        conn.commit(); conn.close()
-        print(f"\n" + "!"*45 + f"\n REPORTE CIERRE MESA {estado['mesa']} | TOTAL: ${total}\n FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n" + "!"*45 + "\n")
-        db_limpiar_mesa(estado["mesa"]); cuentas[estado["mesa"]] = []; ir_a_mesas(None)
+    def finalizar_pago(e):
+        items = cuentas[estado["mesa"]]
+        detalle = "\n".join([f"• {i['q']}x {i['n']}" for i in items])
+        total = sum(i['p'] * i['q'] for i in items)
+        
+        print(f"\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print(f" REPORTE CIERRE MESA {estado['mesa']} | TOTAL: ${total}")
+        print(f" FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
 
-    # --- INTERFACES (FONDOS SÓLIDOS) ---
+        db_registrar_venta_final(estado["mesa"], detalle, total)
+        db_limpiar_mesa(estado["mesa"])
+        cuentas[estado["mesa"]] = []; ir_a_mesas(None)
+
+    # --- INTERFACES ---
     grid_mesas = ft.GridView(expand=True, runs_count=5, spacing=15)
     for i in range(1, 21):
-        grid_mesas.controls.append(ft.Container(content=ft.Text(f"{i}", color="white", size=22, weight="bold"),
-            bgcolor="blue", border_radius=10, padding=20, on_click=ir_a_pedido, data=i))
+        grid_mesas.controls.append(ft.Container(content=ft.Text(f"{i}", color="white", size=22, weight="bold"), bgcolor="blue", border_radius=10, padding=20, on_click=ir_a_pedido, data=i))
 
     v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("SALÓN", size=30, weight="bold", expand=True), ft.TextButton("ADMIN", on_click=ir_a_login)]), grid_mesas]), expand=True, padding=20, bgcolor="white")
 
-    v_login = ft.Container(content=ft.Column([ft.Text("ACCESO ADMIN", size=30, weight="bold"), user_input := ft.TextField(label="Usuario", width=300), pass_input := ft.TextField(label="Contraseña", password=True, width=300), ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=300, on_click=validar_login), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment="center", horizontal_alignment="center"), visible=False, expand=True, bgcolor="white")
+    # LOGIN TOTALMENTE CENTRADO (METODO SEGURO)
+    user_input = ft.TextField(label="Usuario", width=350)
+    pass_input = ft.TextField(label="Contraseña", password=True, width=350)
+    
+    # Usamos una Fila y Columna con MainAxisAlignment para centrar sin usar módulos problemáticos
+    v_login = ft.Container(
+        content=ft.Row(
+            [
+                ft.Column(
+                    [
+                        ft.Text("ACCESO ADMIN", size=40, weight="bold"),
+                        user_input,
+                        pass_input,
+                        ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=validar_login),
+                        ft.TextButton("VOLVER", on_click=ir_a_mesas)
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        visible=False, 
+        expand=True, 
+        bgcolor="white"
+    )
 
-    col_resumen_balance, col_lista_compras = ft.Column(), ft.Column(scroll="always", expand=True)
-    v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("ADMINISTRACIÓN", size=30, weight="bold"), ft.TextButton("CERRAR", on_click=ir_a_mesas)], alignment="spaceBetween"), ft.Row([ft.Column([ft.Text("BALANCE", size=22, weight="bold"), col_resumen_balance, ft.Divider(), ft.Text("HISTORIAL", size=18, weight="bold"), col_lista_compras], expand=1), ft.VerticalDivider(), ft.Column([ft.Text("INVENTARIO", size=22, weight="bold"), ft.Row([input_gasto_nom := ft.TextField(label="Producto", expand=True), input_gasto_cant := ft.TextField(label="Cant.", width=80, value="1"), input_gasto_monto := ft.TextField(label="Total $", width=140)]), ft.ElevatedButton("GUARDAR", bgcolor="red", color="white", width=400, on_click=registrar_compra)], expand=1)], expand=True)]), visible=False, expand=True, padding=30, bgcolor="white")
+    col_reportes_dia = ft.Column(scroll="always", expand=True)
+    txt_ingreso_total_dia = ft.Text("", size=25, weight="bold", color="green")
+    v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([ft.ElevatedButton("CIERRE DE CAJA", bgcolor="orange", color="white", on_click=abrir_confirmacion_cierre), ft.TextButton("SALIR", on_click=ir_a_mesas)])], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
+
+    v_confirm_cierre = ft.Container(content=ft.Row([ft.Column([ft.Text("¡ADVERTENCIA!", size=30, weight="bold", color="red"), ft.Text("De seguir con la acción, se resetearán\nlos ingresos guardados.", size=20, text_align="center"), ft.Row([ft.ElevatedButton("SÍ, CONTINUAR", bgcolor="green", color="white", on_click=ejecutar_cierre_final, width=200, height=60), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', False), page.update()], width=200, height=60)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), bgcolor="rgba(255,255,255,0.95)", visible=False, expand=True)
+
+    txt_resumen_cierre_total = ft.Text("", size=35, weight="bold", color="green")
+    txt_resumen_cierre_fecha = ft.Text("", size=20)
+    v_resumen_cierre = ft.Container(content=ft.Row([ft.Column([ft.Text("RESUMEN DE CIERRE", size=30, weight="bold"), ft.Divider(), txt_resumen_cierre_total, txt_resumen_cierre_fecha, ft.Container(height=20), ft.ElevatedButton("CERRAR", bgcolor="blue", color="white", width=400, height=80, on_click=ir_a_admin)], alignment="center", horizontal_alignment="center")], alignment="center"), bgcolor="white", visible=False, expand=True)
 
     txt_titulo_mesa, col_ticket, txt_total, grid_prods = ft.Text("", size=25, weight="bold"), ft.Column(scroll="always", expand=True), ft.Text("TOTAL: $0", size=35, weight="bold", color="green"), ft.Column(expand=True)
-    v_pedido = ft.Container(content=ft.Row([ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), ft.Row([ft.ElevatedButton("BEBIDAS", on_click=lambda _: filtrar_menu("BEBIDAS")), ft.ElevatedButton("COMIDA", on_click=lambda _: filtrar_menu("COMIDA")), ft.ElevatedButton("POSTRES", on_click=lambda _: filtrar_menu("POSTRES"))]), grid_prods], expand=3), ft.Container(content=ft.Column([txt_titulo_mesa, ft.Divider(), col_ticket, ft.Divider(), txt_total, ft.ElevatedButton("ENVIAR COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400), ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=abrir_confirmacion, width=400)]), expand=2, bgcolor="#F5F5F5", padding=20, border_radius=15)]), expand=True, visible=False, bgcolor="white")
+    v_pedido = ft.Container(content=ft.Row([ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), ft.Row([ft.ElevatedButton("BEBIDAS", on_click=lambda _: [grid_prods.controls.clear(), [grid_prods.controls.append(ft.ElevatedButton(f"{p['n']}\n${p['p']}", on_click=lambda e, n=p['n'], pr=p['p'], d=p['d']: agregar_item(n, pr, d), height=80)) for p in MENU if p['c'] == 'BEBIDAS'], page.update()]), ft.ElevatedButton("COMIDA", on_click=lambda _: [grid_prods.controls.clear(), [grid_prods.controls.append(ft.ElevatedButton(f"{p['n']}\n${p['p']}", on_click=lambda e, n=p['n'], pr=p['p'], d=p['d']: agregar_item(n, pr, d), height=80)) for p in MENU if p['c'] == 'COMIDA'], page.update()]), ft.ElevatedButton("POSTRES", on_click=lambda _: [grid_prods.controls.clear(), [grid_prods.controls.append(ft.ElevatedButton(f"{p['n']}\n${p['p']}", on_click=lambda e, n=p['n'], pr=p['p'], d=p['d']: agregar_item(n, pr, d), height=80)) for p in MENU if p['c'] == 'POSTRES'], page.update()])]), grid_prods], expand=3), ft.Container(content=ft.Column([txt_titulo_mesa, ft.Divider(), col_ticket, ft.Divider(), txt_total, ft.ElevatedButton("ENVIAR COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400), ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=abrir_confirmacion)]), expand=2, bgcolor="#F5F5F5", padding=20, border_radius=15)]), expand=True, visible=False, bgcolor="white")
 
-    v_confirmacion = ft.Container(content=ft.Column([ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"), ft.Row([ft.ElevatedButton("SÍ, PAGAR", bgcolor="green", color="white", on_click=mostrar_ticket_final, width=180, height=60), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirmacion, 'visible', False), page.update()], width=180, height=60)], alignment="center")], alignment="center"), bgcolor="rgba(255,255,255,0.9)", visible=False, expand=True)
+    v_confirmacion = ft.Container(content=ft.Row([ft.Column([ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"), ft.Row([ft.ElevatedButton("SÍ, PAGAR", bgcolor="green", color="white", on_click=mostrar_ticket_final, width=180, height=60), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirmacion, 'visible', False), page.update()], width=180, height=60)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), bgcolor="rgba(255,255,255,0.9)", visible=False, expand=True)
     col_resumen_final, txt_total_final = ft.Column(scroll="always", expand=True), ft.Text("", size=40, weight="bold", color="green")
-    v_ticket_final = ft.Container(content=ft.Column([ft.Text("RESUMEN DE VENTA", size=30, weight="bold", text_align="center"), ft.Divider(), col_resumen_final, ft.Divider(), txt_total_final, ft.ElevatedButton("FINALIZAR", bgcolor="blue", color="white", width=400, height=80, on_click=finalizar_y_limpiar)], horizontal_alignment="center"), bgcolor="white", visible=False, expand=True, padding=50)
+    v_ticket_final = ft.Container(content=ft.Column([ft.Text("RESUMEN DE VENTA", size=30, weight="bold", text_align="center"), ft.Divider(), col_resumen_final, ft.Divider(), txt_total_final, ft.ElevatedButton("FINALIZAR", bgcolor="blue", color="white", width=400, height=80, on_click=finalizar_pago)], horizontal_alignment="center"), bgcolor="white", visible=False, expand=True, padding=50)
 
-    page.add(ft.Stack([v_mesas, v_pedido, v_login, v_admin, v_confirmacion, v_ticket_final], expand=True))
+    page.add(ft.Stack([v_mesas, v_pedido, v_login, v_admin, v_confirmacion, v_ticket_final, v_confirm_cierre, v_resumen_cierre], expand=True))
     ir_a_mesas(None)
 
 ft.app(target=main)
