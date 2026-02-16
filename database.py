@@ -4,12 +4,20 @@ from datetime import datetime
 def init_db():
     conn = sqlite3.connect("pos_restaurante.db")
     cursor = conn.cursor()
-    # Creación de tablas
+    # Tablas principales
     cursor.execute("CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, mesa_id INTEGER, detalle TEXT, total REAL, fecha TEXT, metodo_pago TEXT, cerrada INTEGER DEFAULT 0)")
     cursor.execute("CREATE TABLE IF NOT EXISTS items_activos (id INTEGER PRIMARY KEY AUTOINCREMENT, mesa_id INTEGER, nombre TEXT, precio REAL, cantidad INTEGER, destino TEXT, enviado INTEGER)")
     cursor.execute("CREATE TABLE IF NOT EXISTS productos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, precio REAL, categoria TEXT, destino TEXT)")
     
-    # Inserción inicial de productos si la tabla está vacía
+    # Tabla de configuración para el ID de la Tablet
+    cursor.execute("CREATE TABLE IF NOT EXISTS configuracion (clave TEXT PRIMARY KEY, valor TEXT)")
+    
+    # Inicializar ID por defecto si no existe
+    cursor.execute("SELECT valor FROM configuracion WHERE clave='tablet_id'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('tablet_id', '01')")
+
+    # Poblado inicial del menú
     cursor.execute("SELECT count(*) FROM productos")
     if cursor.fetchone()[0] == 0:
         menu_inicial = [
@@ -18,9 +26,23 @@ def init_db():
             ("Pizza", 200, "COMIDA", "COCINA"), ("Pastel", 60, "POSTRES", "OTROS")
         ]
         cursor.executemany("INSERT INTO productos (nombre, precio, categoria, destino) VALUES (?,?,?,?)", menu_inicial)
+    
     conn.commit()
     conn.close()
 
+# --- FUNCIONES DE CONFIGURACIÓN ---
+def db_obtener_tablet_id():
+    conn = sqlite3.connect("pos_restaurante.db")
+    res = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='tablet_id'").fetchone()
+    conn.close()
+    return res[0] if res else "01"
+
+def db_actualizar_tablet_id(nuevo_id):
+    conn = sqlite3.connect("pos_restaurante.db")
+    conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='tablet_id'", (nuevo_id,))
+    conn.commit(); conn.close()
+
+# --- FUNCIONES DE PERSISTENCIA ---
 def db_guardar_item_activo(mesa, item):
     conn = sqlite3.connect("pos_restaurante.db")
     cursor = conn.cursor()
@@ -56,7 +78,8 @@ def db_limpiar_mesa(mesa):
 def db_registrar_venta_final(mesa_id, detalle, total, metodo):
     conn = sqlite3.connect("pos_restaurante.db")
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn.cursor().execute("INSERT INTO ventas (mesa_id, detalle, total, fecha, metodo_pago, cerrada) VALUES (?, ?, ?, ?, ?, 0)", (mesa_id, detalle, total, ahora, metodo))
+    conn.cursor().execute("INSERT INTO ventas (mesa_id, detalle, total, fecha, metodo_pago, cerrada) VALUES (?, ?, ?, ?, ?, 0)", 
+                           (mesa_id, detalle, total, ahora, metodo))
     conn.commit(); conn.close()
 
 def db_ejecutar_cierre_caja():
@@ -77,6 +100,7 @@ def db_cargar_estado_inicial():
     for f in filas: datos[f[0]].append({"n": f[1], "p": f[2], "q": f[3], "d": f[4], "enviado": bool(f[5])})
     return datos
 
+# --- GESTIÓN DE PRODUCTOS ---
 def db_obtener_productos():
     conn = sqlite3.connect("pos_restaurante.db")
     prods = conn.cursor().execute("SELECT id, nombre, precio, categoria, destino FROM productos").fetchall()

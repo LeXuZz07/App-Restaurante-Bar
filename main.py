@@ -1,8 +1,8 @@
 import flet as ft
 from datetime import datetime
 import os
-import database as db # Importamos nuestra capa de datos
-import reports as rp  # Importamos nuestra capa de reportes
+import database as db
+import reports as rp
 
 def main(page: ft.Page):
     db.init_db()
@@ -13,7 +13,12 @@ def main(page: ft.Page):
     cuentas = db.db_cargar_estado_inicial()
     estado = {"mesa": 0}
 
-    # --- NAVEGACIÓN Y LÓGICA DE INTERFAZ ---
+    # --- UI COMPONENTS (DECLARADOS TEMPRANO PARA ACCESO GLOBAL) ---
+    user_input = ft.TextField(label="Usuario", width=350)
+    pass_input = ft.TextField(label="Contraseña", password=True, width=350)
+    txt_config_tablet_id = ft.TextField(label="ID Tablet", width=120, input_filter=ft.NumbersOnlyInputFilter(), text_align="center")
+
+    # --- NAVEGACIÓN ---
     def ocultar_todo():
         v_mesas.visible = v_pedido.visible = v_login.visible = False
         v_admin.visible = v_confirmacion.visible = v_ticket_final.visible = False
@@ -21,34 +26,42 @@ def main(page: ft.Page):
         v_pago_finalizado.visible = v_gestion_menu.visible = False
         columna_botones_acciones.visible = True
 
-    def salir_de_la_app(e):
-        os._exit(0)
+    def salir_de_la_app(e): os._exit(0)
 
     def ir_a_mesas(e):
         ocultar_todo()
+        # SE RESTAURA LIMPIEZA DE LOGIN
+        user_input.value = ""; pass_input.value = ""
         v_mesas.visible = True
         for c in grid_mesas.controls: c.bgcolor = "orange" if len(cuentas[c.data]) > 0 else "blue"
         page.update()
 
     def ir_a_admin(e):
         ocultar_todo()
-        v_admin.visible = True
-        actualizar_reporte_admin()
-        page.update()
+        txt_config_tablet_id.value = db.db_obtener_tablet_id()
+        v_admin.visible = True; actualizar_reporte_admin(); page.update()
 
     def ir_a_gestion_menu(e):
-        ocultar_todo()
-        v_gestion_menu.visible = True
-        refrescar_lista_gestion()
-        page.update()
+        ocultar_todo(); v_gestion_menu.visible = True; refrescar_lista_gestion(); page.update()
 
     def ir_a_pedido(e):
-        ocultar_todo()
-        estado["mesa"] = e.control.data
+        ocultar_todo(); estado["mesa"] = e.control.data
         txt_titulo_mesa.value = f"MESA #{estado['mesa']}"
-        v_pedido.visible = True
-        mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
-        refrescar_ticket()
+        v_pedido.visible = True; mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
+        refrescar_ticket(); page.update()
+
+    # --- SEGURIDAD ID ---
+    def validar_y_guardar_id(e):
+        valor = txt_config_tablet_id.value
+        if valor.isdigit() and int(valor) > 0:
+            id_final = valor.zfill(2)
+            db.db_actualizar_tablet_id(id_final)
+            txt_config_tablet_id.value = id_final
+            page.snack_bar = ft.SnackBar(ft.Text(f"ID actualizado a: {id_final}"))
+            page.snack_bar.open = True
+        else:
+            page.snack_bar = ft.SnackBar(ft.Text("Error: Ingresa un número válido mayor a 0"), bgcolor="red")
+            page.snack_bar.open = True
         page.update()
 
     def mostrar_mensaje_central(texto, color_texto):
@@ -56,7 +69,7 @@ def main(page: ft.Page):
         grid_prods.controls.append(ft.Column([ft.Container(height=100), ft.Row([ft.Text(texto, size=22, color=color_texto, weight="bold", text_align="center")], alignment=ft.MainAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, width=700))
         page.update()
 
-    # --- LOGS DE TERMINAL Y PEDIDOS ---
+    # --- LÓGICA DE PEDIDOS CON LOGS ---
     def refrescar_ticket():
         col_ticket.controls.clear(); total = 0
         for item in cuentas[estado["mesa"]]:
@@ -94,8 +107,8 @@ def main(page: ft.Page):
         for i in cuentas[m_id]: i["enviado"] = True
         print(f"[*] ENVIANDO COMANDA MESA {m_id}")
         for dest in ["BARRA", "COCINA", "OTROS"]:
-            items = [f"{i['q']}x {i['n']}" for i in nuevos if i["d"] == dest]
-            if items: print(f"    -> {dest}: {', '.join(items)}")
+            lista = [f"{i['q']}x {i['n']}" for i in nuevos if i["d"] == dest]
+            if lista: print(f"    -> {dest}: {', '.join(lista)}")
         refrescar_ticket(); mostrar_mensaje_central("¡ORDEN ENVIADA!", "green")
 
     # --- PAGO Y CIERRE CON LOGS ---
@@ -115,43 +128,35 @@ def main(page: ft.Page):
     def ejecutar_cierre_final(e):
         ventas = db.db_obtener_ventas_activas()
         total = sum(v[2] for v in ventas); efe = sum(v[2] for v in ventas if v[4].lower() == "efectivo"); tar = sum(v[2] for v in ventas if v[4].lower() == "tarjeta")
-        rp.generar_excel_cierre(ventas, total, efe, tar); db.db_ejecutar_cierre_caja()
+        rp.generar_excel_cierre(ventas, total, efe, tar, db.db_obtener_tablet_id())
+        db.db_ejecutar_cierre_caja()
         v_confirm_cierre.visible = False; txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total}"; txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"; txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
         txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"; v_resumen_cierre.visible = True; page.update()
 
     # --- UI COMPONENTS ---
-    user_input, pass_input = ft.TextField(label="Usuario", width=350), ft.TextField(label="Pass", password=True, width=350)
     v_login = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO ADMIN", size=40, weight="bold"), user_input, pass_input, ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=lambda _: ir_a_admin(None) if user_input.value=="admin" and pass_input.value=="1234" else None), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
 
     col_reportes_dia, txt_ingreso_total_dia = ft.Column(scroll="always", expand=True), ft.Text("", size=25, weight="bold", color="green")
-    v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu), ft.ElevatedButton("SALIR APP", bgcolor="red", color="white", on_click=salir_de_la_app), ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]), ft.TextButton("SALIR", on_click=ir_a_mesas)])], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
+    v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([txt_config_tablet_id, ft.ElevatedButton("GUARDAR ID", on_click=validar_y_guardar_id), ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu), ft.ElevatedButton("SALIR APP", bgcolor="red", color="white", on_click=salir_de_la_app), ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]), ft.TextButton("SALIR", on_click=ir_a_mesas)])], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
 
     txt_nom, txt_pre = ft.TextField(label="Nombre", width=250), ft.TextField(label="Precio", width=150)
-    dd_cat = ft.Dropdown(label="Cat", width=200, options=[ft.dropdown.Option("BEBIDAS"), ft.dropdown.Option("COMIDA"), ft.dropdown.Option("POSTRES")], value="BEBIDAS")
+    dd_cat = ft.Dropdown(label="Categoría", width=200, options=[ft.dropdown.Option("BEBIDAS"), ft.dropdown.Option("COMIDA"), ft.dropdown.Option("POSTRES")], value="BEBIDAS")
     dd_dest = ft.Dropdown(label="Destino", width=200, options=[ft.dropdown.Option("BARRA"), ft.dropdown.Option("COCINA")], value="BARRA")
     col_lista_prods = ft.Column(scroll="always", expand=True)
-    v_gestion_menu = ft.Container(content=ft.Column([ft.Row([ft.Text("MENÚ", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Row([txt_nom, txt_pre, dd_cat, dd_dest, ft.ElevatedButton("AÑADIR", on_click=lambda _: [db.db_agregar_producto(txt_nom.value, txt_pre.value, dd_cat.value, dd_dest.value), refrescar_lista_gestion()], bgcolor="green", color="white")]), ft.Divider(), col_lista_prods]), visible=False, expand=True, padding=30, bgcolor="white")
+    v_gestion_menu = ft.Container(content=ft.Column([ft.Row([ft.Text("GESTIONAR PRODUCTOS", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Row([txt_nom, txt_pre, dd_cat, dd_dest, ft.ElevatedButton("AÑADIR", on_click=lambda _: [db.db_agregar_producto(txt_nom.value, txt_pre.value, dd_cat.value, dd_dest.value), refrescar_lista_gestion()], bgcolor="green", color="white")]), ft.Divider(), col_lista_prods]), visible=False, expand=True, padding=30, bgcolor="white")
 
     grid_mesas = ft.GridView(expand=True, runs_count=5, spacing=15)
     for i in range(1, 21): grid_mesas.controls.append(ft.Container(content=ft.Text(f"{i}", color="white", weight="bold"), bgcolor="blue", border_radius=10, padding=20, on_click=ir_a_pedido, data=i))
     v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("SALÓN", size=30, weight="bold", expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
 
-    columna_botones_acciones = ft.Column([
-        ft.ElevatedButton("COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400),
-        ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=validar_pago_antes_de_confirmar, width=400)
-    ])
-
+    columna_botones_acciones = ft.Column([ft.ElevatedButton("COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400), ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=validar_pago_antes_de_confirmar, width=400)])
     txt_titulo_mesa, col_ticket, txt_total, grid_prods = ft.Text("", size=25, weight="bold"), ft.Column(scroll="always", expand=True), ft.Text("TOTAL: $0", size=35, weight="bold", color="green"), ft.Column(expand=True)
     v_pedido = ft.Container(content=ft.Row([ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), ft.Row([ft.ElevatedButton("BEBIDAS", on_click=lambda _: filtrar_menu_dinamico("BEBIDAS")), ft.ElevatedButton("COMIDA", on_click=lambda _: filtrar_menu_dinamico("COMIDA")), ft.ElevatedButton("POSTRES", on_click=lambda _: filtrar_menu_dinamico("POSTRES"))]), grid_prods], expand=3), ft.Container(content=ft.Column([txt_titulo_mesa, ft.Divider(), col_ticket, ft.Divider(), txt_total, columna_botones_acciones]), expand=2, bgcolor="#F5F5F5", padding=20, border_radius=15)]), expand=True, visible=False, bgcolor="white")
 
     v_confirmacion = ft.Container(content=ft.Row([ft.Column([ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"), ft.Row([ft.ElevatedButton("SÍ, PAGAR", bgcolor="green", color="white", on_click=lambda _: [col_resumen_final.controls.clear(), [col_resumen_final.controls.append(ft.Text(f"{i['q']}x {i['n']} ... ${i['p']*i['q']}")) for i in cuentas[estado['mesa']]], setattr(v_ticket_final, 'visible', True), setattr(v_confirmacion, 'visible', False), setattr(columna_botones_acciones, 'visible', False), page.update()], width=180, height=60), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirmacion, 'visible', False), page.update()], width=180, height=60)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="rgba(255,255,255,0.9)")
-    
-    col_resumen_final = ft.Column(scroll="always", expand=True)
-    v_ticket_final = ft.Container(content=ft.Column([ft.Text("TICKET", size=30, weight="bold"), col_resumen_final, ft.ElevatedButton("FINALIZAR", bgcolor="blue", color="white", width=400, height=80, on_click=lambda _: [ocultar_todo(), setattr(v_pago_metodo, 'visible', True), page.update()])], horizontal_alignment="center"), bgcolor="white", visible=False, expand=True, padding=50)
-
+    col_resumen_final = ft.Column(scroll="always", expand=True); v_ticket_final = ft.Container(content=ft.Column([ft.Text("TICKET", size=30, weight="bold"), col_resumen_final, ft.ElevatedButton("FINALIZAR", bgcolor="blue", color="white", width=400, height=80, on_click=lambda _: [ocultar_todo(), setattr(v_pago_metodo, 'visible', True), page.update()])], horizontal_alignment="center"), bgcolor="white", visible=False, expand=True, padding=50)
     v_pago_metodo = ft.Container(content=ft.Row([ft.Column([ft.Text("MÉTODO DE PAGO", size=30, weight="bold"), ft.ElevatedButton("EFECTIVO", bgcolor="green", color="white", width=400, height=70, on_click=lambda _: finalizar_pago_total("Efectivo")), ft.ElevatedButton("TARJETA", bgcolor="blue", color="white", width=400, height=70, on_click=lambda _: finalizar_pago_total("Tarjeta"))], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="white")
     v_pago_finalizado = ft.Container(content=ft.Row([ft.Column([ft.Text("GRACIAS", size=40, weight="bold"), txt_mensaje_despedida := ft.Text("", size=22, text_align="center"), ft.ElevatedButton("CERRAR", bgcolor="blue", color="white", width=350, height=70, on_click=ir_a_mesas)], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="white")
-
     v_confirm_cierre = ft.Container(content=ft.Row([ft.Column([ft.Text("¡ADVERTENCIA!", size=30, weight="bold", color="red"), ft.Text("Se resetearán los ingresos."), ft.Row([ft.ElevatedButton("SÍ", bgcolor="green", color="white", on_click=ejecutar_cierre_final, width=150), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', False), page.update()], width=150)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="rgba(255,255,255,0.95)")
     v_resumen_cierre = ft.Container(content=ft.Row([ft.Column([ft.Text("RESUMEN CIERRE", size=30, weight="bold"), txt_resumen_cierre_total := ft.Text("", size=30, color="green", weight="bold"), txt_resumen_efectivo := ft.Text(""), txt_resumen_tarjeta := ft.Text(""), txt_resumen_cierre_fecha := ft.Text("", size=18, weight="bold"), txt_archivo_creado := ft.Text("", size=12, italic=True), ft.ElevatedButton("CERRAR", on_click=ir_a_admin)], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="white")
 
@@ -180,4 +185,5 @@ def main(page: ft.Page):
 
 if __name__ == "__main__":
     try: ft.app(target=main)
-    except: pass
+    except Exception as e:
+        print("\n[!] Aplicación terminada.")
