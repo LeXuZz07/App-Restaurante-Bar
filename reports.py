@@ -4,8 +4,16 @@ from datetime import datetime
 import os
 
 def generar_excel_cierre(ventas, total, efectivo, tarjeta, tablet_id):
-    nombre_subcarpeta = "Reportes Cierre de Caja"
-    if not os.path.exists(nombre_subcarpeta): os.makedirs(nombre_subcarpeta)
+    # Definimos ruta base según el sistema
+    if os.environ.get("FLET_PLATFORM") == "android":
+        base_path = os.getenv("HOME")
+    else:
+        base_path = os.getcwd()
+
+    nombre_subcarpeta = os.path.join(base_path, "Reportes_Cierre")
+    
+    if not os.path.exists(nombre_subcarpeta): 
+        os.makedirs(nombre_subcarpeta)
     
     wb = openpyxl.Workbook()
     ws = wb.active
