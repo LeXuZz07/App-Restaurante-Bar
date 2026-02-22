@@ -26,16 +26,20 @@ def main(page: ft.Page):
     txt_nuevo_pwd = ft.TextField(label="Nueva Contraseña", password=True, width=350)
     txt_mensaje_credenciales = ft.Text("", size=18, weight="bold", text_align="center")
 
+    # NUEVOS COMPONENTES: Para el visor de Excel
+    col_lista_archivos = ft.Column(scroll="always", expand=1)
+    contenedor_tabla_excel = ft.Column(scroll="always", expand=3)
+
     # --- NAVEGACIÓN Y AUTENTICACIÓN ---
     def ocultar_todo():
         v_mesas.visible = v_pedido.visible = v_login.visible = False
         v_admin.visible = v_confirmacion.visible = v_ticket_final.visible = False
         v_confirm_cierre.visible = v_resumen_cierre.visible = v_pago_metodo.visible = False
-        # AQUÍ AGREGAMOS v_credenciales PARA QUE SE OCULTE TAMBIÉN
         v_pago_finalizado.visible = v_gestion_menu.visible = v_credenciales.visible = False
+        v_visor_reportes.visible = False 
         columna_botones_acciones.visible = True
 
-    def salir_de_la_app(e): os._exit(0)
+    # SE ELIMINÓ LA FUNCIÓN salir_de_la_app
 
     def ir_a_mesas(e):
         ocultar_todo()
@@ -65,13 +69,60 @@ def main(page: ft.Page):
         refrescar_lista_gestion()
         page.update()
 
-    # NUEVA FUNCIÓN: Para ir a la pantalla de credenciales
     def ir_a_credenciales(e):
         ocultar_todo()
         txt_nuevo_usr.value = ""
         txt_nuevo_pwd.value = ""
         txt_mensaje_credenciales.value = ""
         v_credenciales.visible = True
+        page.update()
+
+    # --- LÓGICA DEL VISOR DE EXCEL ---
+    def mostrar_contenido_excel(ruta):
+        datos = rp.leer_excel(ruta)
+        contenedor_tabla_excel.controls.clear()
+        
+        if not datos:
+            contenedor_tabla_excel.controls.append(ft.Text("⚠️ Error al leer el archivo o archivo vacío.", color="red"))
+        else:
+            max_cols = len(datos[0]) if datos else 5
+            columnas = [ft.DataColumn(ft.Text(f"Col {i+1}", weight="bold")) for i in range(max_cols)]
+            
+            filas_dt = []
+            for row in datos:
+                row_limpia = row[:max_cols] + [""] * (max_cols - len(row))
+                celdas = [ft.DataCell(ft.Text(str(c))) for c in row_limpia]
+                filas_dt.append(ft.DataRow(cells=celdas))
+            
+            tabla = ft.DataTable(columns=columnas, rows=filas_dt, heading_row_color="black12")
+            contenedor_tabla_excel.controls.append(ft.Row([tabla], scroll="always"))
+        
+        page.update()
+
+    def ir_a_visor_reportes(e):
+        ocultar_todo()
+        col_lista_archivos.controls.clear()
+        contenedor_tabla_excel.controls.clear()
+        contenedor_tabla_excel.controls.append(ft.Text("Selecciona un reporte de la lista para visualizarlo.", color="grey"))
+        
+        base_path = os.getenv("HOME") if os.environ.get("FLET_PLATFORM") == "android" else os.getcwd()
+        ruta_reportes = os.path.join(base_path, "Reportes_Cierre")
+        
+        if os.path.exists(ruta_reportes):
+            archivos = [f for f in os.listdir(ruta_reportes) if f.endswith('.xlsx')]
+            archivos.sort(reverse=True)
+            if archivos:
+                for arch in archivos:
+                    ruta_completa = os.path.join(ruta_reportes, arch)
+                    # CORRECCIÓN DE SINTAXIS: Se quitó 'text=' y se pasó 'arch' de forma directa
+                    btn = ft.ElevatedButton(arch, on_click=lambda e, r=ruta_completa: mostrar_contenido_excel(r), width=300)
+                    col_lista_archivos.controls.append(btn)
+            else:
+                col_lista_archivos.controls.append(ft.Text("No hay reportes generados."))
+        else:
+            col_lista_archivos.controls.append(ft.Text("Carpeta no encontrada. Aún no se han hecho cortes."))
+        
+        v_visor_reportes.visible = True
         page.update()
 
     def ir_a_pedido(e):
@@ -94,7 +145,6 @@ def main(page: ft.Page):
             page.snack_bar.open = True
         page.update()
 
-    # NUEVA FUNCIÓN: Lógica de guardado con mensajes en pantalla
     def guardar_nuevas_credenciales(e):
         txt_mensaje_credenciales.value = ""
         if not txt_nuevo_usr.value or not txt_nuevo_pwd.value:
@@ -175,7 +225,6 @@ def main(page: ft.Page):
     # --- VALIDACIÓN EN LÍNEA PARA PRODUCTOS ---
     def intentar_agregar_producto(e):
         txt_mensaje_error_gestion.value = ""
-        
         if not txt_nom.value or not txt_pre.value:
             txt_mensaje_error_gestion.value = "Completa todos los campos (Nombre y Precio)"
             txt_mensaje_error_gestion.color = "red"
@@ -224,8 +273,9 @@ def main(page: ft.Page):
 
     col_reportes_dia, txt_ingreso_total_dia = ft.Column(scroll="always", expand=True), ft.Text("", size=25, weight="bold", color="green")
     
-    # EL BOTÓN CREDENCIALES AHORA LLAMA A ir_a_credenciales
-    v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([txt_config_tablet_id, ft.ElevatedButton("GUARDAR ID", on_click=validar_y_guardar_id), ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales), ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu), ft.ElevatedButton("SALIR APP", bgcolor="red", color="white", on_click=salir_de_la_app), ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]), ft.TextButton("SALIR", on_click=ir_a_mesas)])], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
+    # SE ELIMINÓ EL BOTÓN "SALIR APP" PARA DESPEJAR LA INTERFAZ
+    # Se agregó scroll="auto" a la fila interna de botones por si la pantalla es pequeña
+    v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([txt_config_tablet_id, ft.ElevatedButton("GUARDAR ID", on_click=validar_y_guardar_id), ft.ElevatedButton("VER REPORTES", bgcolor="green", color="white", on_click=ir_a_visor_reportes), ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales), ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu), ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]), ft.TextButton("SALIR", on_click=ir_a_mesas)], scroll="auto")], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
 
     txt_nom, txt_pre = ft.TextField(label="Nombre", width=250), ft.TextField(label="Precio", width=150)
     dd_cat = ft.Dropdown(label="Categoría", width=200, options=[ft.dropdown.Option("BEBIDAS"), ft.dropdown.Option("COMIDA"), ft.dropdown.Option("POSTRES")], value="BEBIDAS")
@@ -246,7 +296,6 @@ def main(page: ft.Page):
         col_lista_prods
     ]), visible=False, expand=True, padding=30, bgcolor="white")
 
-    # NUEVA PANTALLA: v_credenciales
     v_credenciales = ft.Container(content=ft.Column([
         ft.Row([
             ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), 
@@ -260,6 +309,20 @@ def main(page: ft.Page):
             txt_mensaje_credenciales
         ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
     ], horizontal_alignment=ft.CrossAxisAlignment.CENTER), visible=False, expand=True, padding=30, bgcolor="white")
+
+    # PANTALLA DEL VISOR DE EXCEL
+    v_visor_reportes = ft.Container(content=ft.Column([
+        ft.Row([
+            ft.Text("HISTORIAL DE CORTES (EXCEL)", size=30, weight="bold"), 
+            ft.ElevatedButton("VOLVER", on_click=ir_a_admin)
+        ]), 
+        ft.Divider(),
+        ft.Row([
+            col_lista_archivos,
+            ft.VerticalDivider(),
+            contenedor_tabla_excel
+        ], expand=True, vertical_alignment=ft.CrossAxisAlignment.START)
+    ]), visible=False, expand=True, padding=30, bgcolor="white")
 
     grid_mesas = ft.GridView(expand=True, runs_count=5, spacing=15)
     for i in range(1, 21): grid_mesas.controls.append(ft.Container(content=ft.Text(f"{i}", color="white", weight="bold"), bgcolor="blue", border_radius=10, padding=20, on_click=ir_a_pedido, data=i))
@@ -296,8 +359,7 @@ def main(page: ft.Page):
             grid.controls.append(ft.ElevatedButton(content=ft.Text(f"{p[1]}\n${p[2]}", text_align="center"), on_click=lambda e, n=p[1], pr=p[2], d=p[4]: agregar_item(n, pr, d), height=80))
         grid_prods.controls.append(grid); page.update()
 
-    # SE AGREGÓ v_credenciales A LA PILA DE VISTAS
-    page.add(ft.Stack([v_mesas, v_pedido, v_login, v_admin, v_confirmacion, v_ticket_final, v_confirm_cierre, v_resumen_cierre, v_pago_metodo, v_pago_finalizado, v_gestion_menu, v_credenciales], expand=True))
+    page.add(ft.Stack([v_mesas, v_pedido, v_login, v_admin, v_confirmacion, v_ticket_final, v_confirm_cierre, v_resumen_cierre, v_pago_metodo, v_pago_finalizado, v_gestion_menu, v_credenciales, v_visor_reportes], expand=True))
     ir_a_mesas(None)
 
 if __name__ == "__main__":

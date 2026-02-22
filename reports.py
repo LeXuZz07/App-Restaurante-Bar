@@ -41,3 +41,17 @@ def generar_excel_cierre(ventas, total, efectivo, tarjeta, tablet_id):
     ruta_completa = os.path.join(nombre_subcarpeta, nombre_archivo)
     wb.save(ruta_completa)
     return ruta_completa
+
+# --- NUEVA FUNCIÓN PARA LEER EL EXCEL ---
+def leer_excel(ruta_completa):
+    try:
+        wb = openpyxl.load_workbook(ruta_completa, data_only=True)
+        ws = wb.active
+        filas = []
+        # iter_rows nos da fila por fila, values_only saca el texto directo
+        for row in ws.iter_rows(values_only=True):
+            # Convertimos todo a string y cambiamos los 'None' (celdas vacías) por texto vacío
+            filas.append([str(celda) if celda is not None else "" for celda in row])
+        return filas
+    except Exception as e:
+        return None
