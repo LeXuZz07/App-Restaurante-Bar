@@ -6,37 +6,27 @@ import os
 def get_db_path():
     db_name = "pos_restaurante.db"
     
-    # Lista de todas las carpetas posibles donde Flet/Android podría dejarnos escribir
     rutas_candidatas = [
-        os.environ.get("HOME"),                               # 1. Variable de Flet
-        "/data/user/0/com.lexuzz07.pos_restaurante/files",    # 2. Android Moderno (El nombre real de tu app)
-        "/data/data/com.lexuzz07.pos_restaurante/files",      # 3. Android Clásico
-        os.environ.get("TMPDIR"),                             # 4. Carpeta temporal de Android
-        os.path.expanduser("~"),                              # 5. Linux / PC
-        os.getcwd()                                           # 6. Carpeta actual de desarrollo (PC)
+        os.environ.get("HOME"),                              
+        "/data/user/0/com.lexuzz07.pos_restaurante/files",    
+        "/data/data/com.lexuzz07.pos_restaurante/files",      
+        os.environ.get("TMPDIR"),                             
+        os.path.expanduser("~"),                              
+        os.getcwd()                                           
     ]
 
-    # Buscamos la primera ruta que funcione
     for ruta in rutas_candidatas:
-        if ruta: # Si la ruta no está vacía
+        if ruta: 
             try:
-                # Si la carpeta no existe, la creamos
                 if not os.path.exists(ruta):
                     os.makedirs(ruta, exist_ok=True)
-                
-                # PRUEBA DE FUEGO: Intentamos crear un archivo falso
                 archivo_prueba = os.path.join(ruta, "test_permiso.tmp")
                 with open(archivo_prueba, "w") as f:
                     f.write("acceso concedido")
-                os.remove(archivo_prueba) # Lo borramos de inmediato
-                
-                # Si llegamos a esta línea, ¡tenemos permisos de escritura!
+                os.remove(archivo_prueba) 
                 return os.path.join(ruta, db_name)
             except Exception:
-                # Si da error de permiso, ignoramos y probamos la siguiente ruta
                 continue
-    
-    # Si de milagro fallan todas, intenta crearlo en el aire (fallback extremo)
     return db_name
 
 def get_db_connection():
@@ -50,6 +40,9 @@ def init_db():
     cursor.execute("CREATE TABLE IF NOT EXISTS productos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, precio REAL, categoria TEXT, destino TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS configuracion (clave TEXT PRIMARY KEY, valor TEXT)")
     
+    cursor.execute("CREATE TABLE IF NOT EXISTS categorias (nombre TEXT PRIMARY KEY)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS destinos (nombre TEXT PRIMARY KEY)")
+    
     cursor.execute("SELECT valor FROM configuracion WHERE clave='tablet_id'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('tablet_id', '01')")
@@ -59,20 +52,72 @@ def init_db():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('admin_usr', 'admin')")
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('admin_pass', '1234')")
 
-    # NUEVO: Espacio para guardar mesas bloqueadas
     cursor.execute("SELECT valor FROM configuracion WHERE clave='mesas_bloqueadas'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('mesas_bloqueadas', '')")
+
+    cursor.execute("SELECT count(*) FROM categorias")
+    if cursor.fetchone()[0] == 0:
+        cursor.executemany("INSERT INTO categorias (nombre) VALUES (?)", [("BEBIDAS",), ("COMIDA",), ("POSTRES",)])
+        
+    cursor.execute("SELECT count(*) FROM destinos")
+    if cursor.fetchone()[0] == 0:
+        cursor.executemany("INSERT INTO destinos (nombre) VALUES (?)", [("BARRA",), ("COCINA",)])
 
     cursor.execute("SELECT count(*) FROM productos")
     if cursor.fetchone()[0] == 0:
         menu_inicial = [
             ("Cerveza", 55, "BEBIDAS", "BARRA"), ("Refresco", 35, "BEBIDAS", "BARRA"),
             ("Hamburguesa", 150, "COMIDA", "COCINA"), ("Tacos", 90, "COMIDA", "COCINA"),
-            ("Pizza", 200, "COMIDA", "COCINA"), ("Pastel", 60, "POSTRES", "OTROS")
+            ("Pizza", 200, "COMIDA", "COCINA"), ("Pastel", 60, "POSTRES", "COCINA")
         ]
         cursor.executemany("INSERT INTO productos (nombre, precio, categoria, destino) VALUES (?,?,?,?)", menu_inicial)
     
+    conn.commit()
+    conn.close()
+
+# --- FUNCIONES DE CATEGORÍAS Y DESTINOS DINÁMICOS ---
+def db_obtener_categorias():
+    conn = get_db_connection()
+    res = conn.cursor().execute("SELECT nombre FROM categorias ORDER BY nombre").fetchall()
+    conn.close()
+    return [r[0] for r in res]
+
+def db_agregar_categoria(nombre):
+    conn = get_db_connection()
+    try:
+        conn.cursor().execute("INSERT INTO categorias (nombre) VALUES (?)", (nombre.upper(),))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        pass 
+    conn.close()
+
+def db_eliminar_categoria(nombre):
+    conn = get_db_connection()
+    conn.cursor().execute("DELETE FROM categorias WHERE nombre=?", (nombre,))
+    conn.cursor().execute("DELETE FROM productos WHERE categoria=?", (nombre,)) # Borrado en cascada
+    conn.commit()
+    conn.close()
+
+def db_obtener_destinos():
+    conn = get_db_connection()
+    res = conn.cursor().execute("SELECT nombre FROM destinos ORDER BY nombre").fetchall()
+    conn.close()
+    return [r[0] for r in res]
+
+def db_agregar_destino(nombre):
+    conn = get_db_connection()
+    try:
+        conn.cursor().execute("INSERT INTO destinos (nombre) VALUES (?)", (nombre.upper(),))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        pass
+    conn.close()
+
+def db_eliminar_destino(nombre):
+    conn = get_db_connection()
+    conn.cursor().execute("DELETE FROM destinos WHERE nombre=?", (nombre,))
+    conn.cursor().execute("DELETE FROM productos WHERE destino=?", (nombre,)) # Borrado en cascada
     conn.commit()
     conn.close()
 
