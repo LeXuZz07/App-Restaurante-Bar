@@ -2,14 +2,42 @@ import sqlite3
 from datetime import datetime
 import os
 
-# --- LÓGICA DE RUTA DINÁMICA ---
+# --- LÓGICA DE RUTA DINÁMICA DE FUERZA BRUTA ---
 def get_db_path():
     db_name = "pos_restaurante.db"
-    # Detectamos si estamos en Android
-    if os.environ.get("FLET_PLATFORM") == "android":
-        return os.path.join(os.getenv("HOME"), db_name)
-    # Si estamos en PC (Windows/Linux/Mac)
-    return os.path.join(os.getcwd(), db_name)
+    
+    # Lista de todas las carpetas posibles donde Flet/Android podría dejarnos escribir
+    rutas_candidatas = [
+        os.environ.get("HOME"),                               # 1. Variable de Flet
+        "/data/user/0/com.lexuzz07.pos_restaurante/files",    # 2. Android Moderno (El nombre real de tu app)
+        "/data/data/com.lexuzz07.pos_restaurante/files",      # 3. Android Clásico
+        os.environ.get("TMPDIR"),                             # 4. Carpeta temporal de Android
+        os.path.expanduser("~"),                              # 5. Linux / PC
+        os.getcwd()                                           # 6. Carpeta actual de desarrollo (PC)
+    ]
+
+    # Buscamos la primera ruta que funcione
+    for ruta in rutas_candidatas:
+        if ruta: # Si la ruta no está vacía
+            try:
+                # Si la carpeta no existe, la creamos
+                if not os.path.exists(ruta):
+                    os.makedirs(ruta, exist_ok=True)
+                
+                # PRUEBA DE FUEGO: Intentamos crear un archivo falso
+                archivo_prueba = os.path.join(ruta, "test_permiso.tmp")
+                with open(archivo_prueba, "w") as f:
+                    f.write("acceso concedido")
+                os.remove(archivo_prueba) # Lo borramos de inmediato
+                
+                # Si llegamos a esta línea, ¡tenemos permisos de escritura!
+                return os.path.join(ruta, db_name)
+            except Exception:
+                # Si da error de permiso, ignoramos y probamos la siguiente ruta
+                continue
+    
+    # Si de milagro fallan todas, intenta crearlo en el aire (fallback extremo)
+    return db_name
 
 def get_db_connection():
     return sqlite3.connect(get_db_path())
@@ -26,11 +54,15 @@ def init_db():
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('tablet_id', '01')")
 
-    # --- NUEVO: Credenciales por defecto ---
     cursor.execute("SELECT valor FROM configuracion WHERE clave='admin_usr'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('admin_usr', 'admin')")
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('admin_pass', '1234')")
+
+    # NUEVO: Espacio para guardar mesas bloqueadas
+    cursor.execute("SELECT valor FROM configuracion WHERE clave='mesas_bloqueadas'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('mesas_bloqueadas', '')")
 
     cursor.execute("SELECT count(*) FROM productos")
     if cursor.fetchone()[0] == 0:
@@ -67,6 +99,21 @@ def db_actualizar_credenciales(usr, pwd):
     conn = get_db_connection()
     conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='admin_usr'", (usr,))
     conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='admin_pass'", (pwd,))
+    conn.commit()
+    conn.close()
+
+def db_obtener_mesas_bloqueadas():
+    conn = get_db_connection()
+    res = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='mesas_bloqueadas'").fetchone()
+    conn.close()
+    if res and res[0]:
+        return [int(x) for x in res[0].split(',')] 
+    return []
+
+def db_actualizar_mesas_bloqueadas(lista_mesas):
+    conn = get_db_connection()
+    valor_texto = ",".join(map(str, lista_mesas)) 
+    conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='mesas_bloqueadas'", (valor_texto,))
     conn.commit()
     conn.close()
 

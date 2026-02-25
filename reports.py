@@ -2,18 +2,17 @@ import openpyxl
 from openpyxl.styles import Font
 from datetime import datetime
 import os
+import database as db  # <-- NUEVO: Importamos la base de datos para pedirle la ruta segura
 
 def generar_excel_cierre(ventas, total, efectivo, tarjeta, tablet_id):
-    # Definimos ruta base según el sistema
-    if os.environ.get("FLET_PLATFORM") == "android":
-        base_path = os.getenv("HOME")
-    else:
-        base_path = os.getcwd()
+    # LA JUGADA MAESTRA: Pedimos la ruta de la DB y extraemos solo el nombre de la carpeta
+    ruta_db = db.get_db_path()
+    base_path = os.path.dirname(ruta_db) # Nos da la carpeta exacta con permisos
 
     nombre_subcarpeta = os.path.join(base_path, "Reportes_Cierre")
     
     if not os.path.exists(nombre_subcarpeta): 
-        os.makedirs(nombre_subcarpeta)
+        os.makedirs(nombre_subcarpeta, exist_ok=True)
     
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -42,15 +41,12 @@ def generar_excel_cierre(ventas, total, efectivo, tarjeta, tablet_id):
     wb.save(ruta_completa)
     return ruta_completa
 
-# --- NUEVA FUNCIÓN PARA LEER EL EXCEL ---
 def leer_excel(ruta_completa):
     try:
         wb = openpyxl.load_workbook(ruta_completa, data_only=True)
         ws = wb.active
         filas = []
-        # iter_rows nos da fila por fila, values_only saca el texto directo
         for row in ws.iter_rows(values_only=True):
-            # Convertimos todo a string y cambiamos los 'None' (celdas vacías) por texto vacío
             filas.append([str(celda) if celda is not None else "" for celda in row])
         return filas
     except Exception as e:
