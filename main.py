@@ -66,6 +66,8 @@ def main(page: ft.Page):
     user_input = ft.TextField(label="Usuario", width=350)
     pass_input = ft.TextField(label="Contraseña", password=True, width=350)
     txt_config_tablet_id = ft.TextField(label="ID Tablet", width=120, input_filter=ft.NumbersOnlyInputFilter(), text_align="center")
+    txt_config_num_mesas = ft.TextField(label="Núm. Mesas", width=150, input_filter=ft.NumbersOnlyInputFilter(), text_align="center")
+    
     txt_mensaje_error_gestion = ft.Text("", size=18, weight="bold", expand=True, text_align="center")
     txt_nuevo_usr = ft.TextField(label="Nombre Usuario", width=350)
     txt_nuevo_pwd = ft.TextField(label="Nueva Contraseña", password=True, width=350)
@@ -82,7 +84,6 @@ def main(page: ft.Page):
     txt_nom = ft.TextField(label="Nombre", width=250)
     txt_pre = ft.TextField(label="Precio", width=120)
     
-    # --- MENÚS DESPLEGABLES DINÁMICOS ---
     lista_cat = db.db_obtener_categorias()
     lista_dest = db.db_obtener_destinos()
     
@@ -95,7 +96,6 @@ def main(page: ft.Page):
     txt_total = ft.Text("TOTAL: $0", size=35, weight="bold", color="green")
     grid_prods = ft.Column(expand=True)
     
-    # --- CONTROLES PARA PAGO MIXTO ---
     txt_mixto_total = ft.Text("TOTAL A PAGAR: $0", size=30, weight="bold", color="blue")
     txt_mixto_efectivo = ft.TextField(label="Monto entregado en Efectivo", width=250, text_size=20)
     txt_mixto_tarjeta = ft.TextField(label="Restante a cobrar en Tarjeta", width=250, text_size=20, read_only=True, value="0.0")
@@ -107,7 +107,7 @@ def main(page: ft.Page):
     columna_botones_acciones = None
 
     # =======================================================
-    # 1.5 LÓGICA DE CATEGORÍAS Y DESTINOS (AGREGAR Y BORRAR)
+    # 1.5 LÓGICA DE CATEGORÍAS Y DESTINOS
     # =======================================================
     txt_nueva_cat = ft.TextField(label="Nombre de Categoría", width=300)
     txt_nuevo_dest = ft.TextField(label="Nombre de Destino", width=300)
@@ -122,7 +122,6 @@ def main(page: ft.Page):
             row_categorias_menu.controls.append(ft.ElevatedButton(c, on_click=lambda e, cat=c: filtrar_menu_dinamico(cat)))
         page.update()
 
-    # --- AGREGAR CATEGORÍA ---
     def guardar_categoria(e):
         if txt_nueva_cat.value:
             cat_val = txt_nueva_cat.value.strip().upper()
@@ -140,7 +139,6 @@ def main(page: ft.Page):
         actions=[ft.TextButton("Guardar", on_click=guardar_categoria), ft.TextButton("Cancelar", on_click=lambda _: [setattr(dlg_cat, 'open', False), page.update()])]
     )
 
-    # --- BORRAR CATEGORÍA ---
     def abrir_borrar_categoria(e):
         if dd_cat.value:
             txt_confirmar_borrar_cat.value = f"¿Seguro que deseas borrar la categoría '{dd_cat.value}'?\n\n¡ATENCIÓN: Se borrarán TODOS los productos que pertenezcan a esta categoría!"
@@ -168,7 +166,6 @@ def main(page: ft.Page):
         ]
     )
 
-    # --- AGREGAR DESTINO ---
     def guardar_destino(e):
         if txt_nuevo_dest.value:
             dest_val = txt_nuevo_dest.value.strip().upper()
@@ -185,7 +182,6 @@ def main(page: ft.Page):
         actions=[ft.TextButton("Guardar", on_click=guardar_destino), ft.TextButton("Cancelar", on_click=lambda _: [setattr(dlg_dest, 'open', False), page.update()])]
     )
 
-    # --- BORRAR DESTINO ---
     def abrir_borrar_destino(e):
         if dd_dest.value:
             txt_confirmar_borrar_dest.value = f"¿Seguro que deseas borrar el destino '{dd_dest.value}'?\n\n¡ATENCIÓN: Se borrarán TODOS los productos que pertenezcan a este destino!"
@@ -212,7 +208,6 @@ def main(page: ft.Page):
         ]
     )
 
-    # BOTONERAS DOBLES (+ / -)
     col_btns_cat = ft.Column([
         ft.ElevatedButton("+", bgcolor="green", color="white", height=30, width=45, on_click=lambda _: [setattr(txt_nueva_cat, 'value', ''), setattr(dlg_cat, 'open', True), page.update()]),
         ft.ElevatedButton("-", bgcolor="red", color="white", height=30, width=45, on_click=abrir_borrar_categoria)
@@ -226,7 +221,7 @@ def main(page: ft.Page):
     actualizar_botones_categorias_menu()
 
     # ==========================================
-    # 2. DEFINICIÓN DE FUNCIONES MAIN
+    # 2. DEFINICIÓN DE FUNCIONES
     # ==========================================
     def ocultar_todo():
         if v_mesas: v_mesas.visible = False
@@ -247,19 +242,33 @@ def main(page: ft.Page):
         if v_pago_mixto: v_pago_mixto.visible = False
         if columna_botones_acciones: columna_botones_acciones.visible = True
 
+    def inicializar_salon():
+        grid_mesas.controls.clear()
+        num_mesas = db.db_obtener_num_mesas()
+        
+        for i in range(1, num_mesas + 1):
+            if i not in cuentas:
+                cuentas[i] = [] 
+            
+            color_fondo = "blue"
+            if i in mesas_bloqueadas:
+                color_fondo = "grey"
+            elif len(cuentas[i]) > 0:
+                color_fondo = "orange"
+                
+            grid_mesas.controls.append(
+                ft.Container(
+                    content=ft.Text(f"{i}", color="white", weight="bold"), 
+                    bgcolor=color_fondo, border_radius=10, padding=20, on_click=ir_a_pedido, data=i
+                )
+            )
+
     def ir_a_mesas(e):
         ocultar_todo()
         user_input.value = ""; pass_input.value = ""
         user_input_bloqueo.value = ""; pass_input_bloqueo.value = ""
         v_mesas.visible = True
-        for c in grid_mesas.controls: 
-            m_id = c.data
-            if m_id in mesas_bloqueadas:
-                c.bgcolor = "grey"
-            elif len(cuentas[m_id]) > 0:
-                c.bgcolor = "orange"
-            else:
-                c.bgcolor = "blue"
+        inicializar_salon()
         page.update()
 
     def intentar_login(e):
@@ -320,7 +329,8 @@ def main(page: ft.Page):
 
     def refrescar_grid_bloqueo():
         grid_bloqueo.controls.clear()
-        for i in range(1, 21):
+        num_mesas = db.db_obtener_num_mesas()
+        for i in range(1, num_mesas + 1):
             color = "red" if i in mesas_bloqueadas else "green"
             estado_txt = "BLOQUEADA" if i in mesas_bloqueadas else "LIBRE"
             grid_bloqueo.controls.append(
@@ -331,6 +341,8 @@ def main(page: ft.Page):
 
     def ir_a_bloqueo_mesas(e):
         ocultar_todo()
+        # Precargamos el número de mesas en la caja de texto
+        txt_config_num_mesas.value = str(db.db_obtener_num_mesas())
         refrescar_grid_bloqueo()
         v_bloqueo_mesas.visible = True
         page.update()
@@ -412,6 +424,23 @@ def main(page: ft.Page):
             page.snack_bar.open = True
         else:
             page.snack_bar = ft.SnackBar(ft.Text("Error: Ingresa un número válido mayor a 0"), bgcolor="red")
+            page.snack_bar.open = True
+        page.update()
+
+    def guardar_num_mesas(e):
+        n_mesas = txt_config_num_mesas.value
+        if n_mesas.isdigit() and int(n_mesas) > 0:
+            mesas_final = int(n_mesas)
+            db.db_actualizar_num_mesas(mesas_final)
+            txt_config_num_mesas.value = str(mesas_final)
+            
+            inicializar_salon()
+            refrescar_grid_bloqueo()
+            
+            page.snack_bar = ft.SnackBar(ft.Text(f"Ajustes Guardados. El salón ahora tiene {mesas_final} mesas."), bgcolor="green")
+            page.snack_bar.open = True
+        else:
+            page.snack_bar = ft.SnackBar(ft.Text("Error: Ingresa un número de mesas válido"), bgcolor="red")
             page.snack_bar.open = True
         page.update()
 
@@ -630,19 +659,18 @@ def main(page: ft.Page):
     # ==========================================
     # 3. CONSTRUCCIÓN DE LA INTERFAZ FINAL
     # ==========================================
-    for i in range(1, 21): 
-        grid_mesas.controls.append(ft.Container(content=ft.Text(f"{i}", color="white", weight="bold"), bgcolor="blue", border_radius=10, padding=20, on_click=ir_a_pedido, data=i))
+    inicializar_salon() 
 
     columna_botones_acciones = ft.Column([ft.ElevatedButton("COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400), ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=validar_pago_antes_de_confirmar, width=400)])
     
-    # Aseguramos que todas las ventanas emergentes estén registradas en la página
     page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest])
 
     v_login = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO ADMIN", size=40, weight="bold"), user_input, pass_input, ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=intentar_login), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
-    v_login_bloqueo = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO GESTOR DE MESAS", size=40, weight="bold"), user_input_bloqueo, pass_input_bloqueo, ft.ElevatedButton("ENTRAR", bgcolor="red", color="white", width=350, height=50, on_click=intentar_login_bloqueo), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
+    v_login_bloqueo = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO A CONFIGURACIÓN", size=40, weight="bold"), user_input_bloqueo, pass_input_bloqueo, ft.ElevatedButton("ENTRAR", bgcolor="red", color="white", width=350, height=50, on_click=intentar_login_bloqueo), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
+    
+    # LA VISTA DE ADMIN VUELVE A ESTAR LIMPIA Y ORDENADA
     v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([txt_config_tablet_id, ft.ElevatedButton("GUARDAR ID", on_click=validar_y_guardar_id), ft.ElevatedButton("VER REPORTES", bgcolor="green", color="white", on_click=ir_a_visor_reportes), ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales), ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu), ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]), ft.TextButton("SALIR", on_click=ir_a_mesas)], scroll="auto")], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
     
-    # --- VISTA GESTIÓN MENU ACTUALIZADA (Botones +/- sin iconos) ---
     v_gestion_menu = ft.Container(content=ft.Column([
         ft.Row([ft.Text("GESTIONAR PRODUCTOS", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin), txt_mensaje_error_gestion]), 
         ft.Row([
@@ -656,8 +684,17 @@ def main(page: ft.Page):
     
     v_credenciales = ft.Container(content=ft.Column([ft.Row([ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Column([txt_nuevo_usr, txt_nuevo_pwd, ft.ElevatedButton("GUARDAR CAMBIOS", on_click=guardar_nuevas_credenciales, bgcolor="green", color="white", width=350, height=50), txt_mensaje_credenciales], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), visible=False, expand=True, padding=30, bgcolor="white")
     v_visor_reportes = ft.Container(content=ft.Column([ft.Row([ft.Text("HISTORIAL DE CORTES (EXCEL)", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Row([col_lista_archivos, ft.VerticalDivider(), contenedor_tabla_excel], expand=True, vertical_alignment=ft.CrossAxisAlignment.START)]), visible=False, expand=True, padding=30, bgcolor="white")
-    v_bloqueo_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("GESTOR DE MESAS", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)]), ft.Text("Toca una mesa para cambiar su estado. Verde = Libre | Rojo = Bloqueada", color="grey"), ft.Divider(), grid_bloqueo]), visible=False, expand=True, padding=30, bgcolor="white")
-    v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("SALÓN", size=30, weight="bold"), ft.ElevatedButton("BLOQUEAR MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
+    
+    # LA NUEVA VISTA DE CONFIGURACIÓN DE MESAS
+    v_bloqueo_mesas = ft.Container(content=ft.Column([
+        ft.Row([ft.Text("CONFIGURACIÓN DE MESAS", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"), 
+        ft.Row([txt_config_num_mesas, ft.ElevatedButton("ACTUALIZAR CANTIDAD", bgcolor="blue", color="white", on_click=guardar_num_mesas)]),
+        ft.Text("Toca una mesa para cambiar su estado. Verde = Libre | Rojo = Bloqueada", color="grey"), 
+        ft.Divider(), 
+        grid_bloqueo
+    ]), visible=False, expand=True, padding=30, bgcolor="white")
+    
+    v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("SALÓN", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
     
     v_pedido = ft.Container(content=ft.Row([ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), row_categorias_menu, grid_prods], expand=3), ft.Container(content=ft.Column([txt_titulo_mesa, ft.Divider(), col_ticket, ft.Divider(), txt_total, columna_botones_acciones]), expand=2, bgcolor="#F5F5F5", padding=20, border_radius=15)]), expand=True, visible=False, bgcolor="white")
     

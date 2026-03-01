@@ -47,6 +47,11 @@ def init_db():
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('tablet_id', '01')")
 
+    # NUEVO: CONFIGURACIÓN DE NÚMERO DE MESAS
+    cursor.execute("SELECT valor FROM configuracion WHERE clave='num_mesas'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('num_mesas', '20')")
+
     cursor.execute("SELECT valor FROM configuracion WHERE clave='admin_usr'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('admin_usr', 'admin')")
@@ -95,7 +100,7 @@ def db_agregar_categoria(nombre):
 def db_eliminar_categoria(nombre):
     conn = get_db_connection()
     conn.cursor().execute("DELETE FROM categorias WHERE nombre=?", (nombre,))
-    conn.cursor().execute("DELETE FROM productos WHERE categoria=?", (nombre,)) # Borrado en cascada
+    conn.cursor().execute("DELETE FROM productos WHERE categoria=?", (nombre,)) 
     conn.commit()
     conn.close()
 
@@ -117,7 +122,7 @@ def db_agregar_destino(nombre):
 def db_eliminar_destino(nombre):
     conn = get_db_connection()
     conn.cursor().execute("DELETE FROM destinos WHERE nombre=?", (nombre,))
-    conn.cursor().execute("DELETE FROM productos WHERE destino=?", (nombre,)) # Borrado en cascada
+    conn.cursor().execute("DELETE FROM productos WHERE destino=?", (nombre,)) 
     conn.commit()
     conn.close()
 
@@ -131,6 +136,17 @@ def db_obtener_tablet_id():
 def db_actualizar_tablet_id(nuevo_id):
     conn = get_db_connection()
     conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='tablet_id'", (nuevo_id,))
+    conn.commit(); conn.close()
+
+def db_obtener_num_mesas():
+    conn = get_db_connection()
+    res = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='num_mesas'").fetchone()
+    conn.close()
+    return int(res[0]) if res else 20
+
+def db_actualizar_num_mesas(num):
+    conn = get_db_connection()
+    conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='num_mesas'", (str(num),))
     conn.commit(); conn.close()
 
 def db_obtener_credenciales():
@@ -213,11 +229,19 @@ def db_obtener_ventas_activas():
     conn.close(); return datos
 
 def db_cargar_estado_inicial():
+    num_mesas = db_obtener_num_mesas()
     conn = get_db_connection()
     filas = conn.cursor().execute("SELECT mesa_id, nombre, precio, cantidad, destino, enviado FROM items_activos").fetchall()
     conn.close()
-    datos = {i: [] for i in range(1, 21)}
-    for f in filas: datos[f[0]].append({"n": f[1], "p": f[2], "q": f[3], "d": f[4], "enviado": bool(f[5])})
+    
+    # Creamos diccionarios según la cantidad configurada
+    datos = {i: [] for i in range(1, num_mesas + 1)}
+    
+    # Aseguramos que si hay mesas con órdenes viejas (superiores a la nueva cantidad), no crashee
+    for f in filas: 
+        if f[0] not in datos:
+            datos[f[0]] = []
+        datos[f[0]].append({"n": f[1], "p": f[2], "q": f[3], "d": f[4], "enviado": bool(f[5])})
     return datos
 
 def db_obtener_productos():
