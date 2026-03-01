@@ -1,6 +1,7 @@
 import flet as ft
 from datetime import datetime
 import os
+import urllib.request
 import database as db
 import reports as rp
 
@@ -107,7 +108,71 @@ def main(page: ft.Page):
     columna_botones_acciones = None
 
     # =======================================================
-    # 1.5 LÓGICA DE CATEGORÍAS Y DESTINOS
+    # 1.5 LÓGICA DE CARGA DE LOGO (VÍA URL + BORRADO)
+    # =======================================================
+    txt_logo_url = ft.TextField(label="Enlace (URL) de la imagen", width=350)
+    txt_estado_descarga = ft.Text("")
+
+    def guardar_logo_url(e):
+        url = txt_logo_url.value.strip()
+        if url:
+            txt_estado_descarga.value = "Descargando..."
+            txt_estado_descarga.color = "blue"
+            page.update()
+            try:
+                ruta_db = db.get_db_path()
+                base_path = os.path.dirname(ruta_db)
+                
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                nombre_archivo = f"logo_restaurante_{timestamp}.png"
+                ruta_destino = os.path.join(base_path, nombre_archivo)
+                
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req) as response, open(ruta_destino, 'wb') as out_file:
+                    out_file.write(response.read())
+                
+                db.db_actualizar_logo(ruta_destino)
+                inicializar_salon() 
+                
+                dlg_logo.open = False
+                page.snack_bar = ft.SnackBar(ft.Text("¡Logo descargado y aplicado exitosamente!"), bgcolor="green")
+                page.snack_bar.open = True
+                txt_estado_descarga.value = ""
+                page.update()
+            except Exception as ex:
+                txt_estado_descarga.value = f"Error: No se pudo descargar la imagen."
+                txt_estado_descarga.color = "red"
+                page.update()
+
+    def borrar_logo(e):
+        ruta_actual = db.db_obtener_logo()
+        if ruta_actual and os.path.exists(ruta_actual):
+            try:
+                os.remove(ruta_actual)
+            except Exception:
+                pass
+        
+        db.db_actualizar_logo("")
+        inicializar_salon()
+        page.snack_bar = ft.SnackBar(ft.Text("Logo eliminado. Las mesas están limpias."), bgcolor="green")
+        page.snack_bar.open = True
+        page.update()
+
+    dlg_logo = ft.AlertDialog(
+        title=ft.Text("Descargar Logo"),
+        content=ft.Column([
+            ft.Text("Pega el enlace de internet donde esté alojado tu logo (ej. link directo de Postimages)."),
+            txt_logo_url,
+            txt_estado_descarga
+        ], tight=True),
+        actions=[
+            ft.TextButton("Descargar", on_click=guardar_logo_url), 
+            ft.TextButton("Cancelar", on_click=lambda _: [setattr(dlg_logo, 'open', False), page.update()])
+        ]
+    )
+
+    # =======================================================
+    # 1.6 LÓGICA DE CATEGORÍAS Y DESTINOS
     # =======================================================
     txt_nueva_cat = ft.TextField(label="Nombre de Categoría", width=300)
     txt_nuevo_dest = ft.TextField(label="Nombre de Destino", width=300)
@@ -127,6 +192,7 @@ def main(page: ft.Page):
             cat_val = txt_nueva_cat.value.strip().upper()
             db.db_agregar_categoria(cat_val)
             opciones = db.db_obtener_categorias()
+            # === AQUÍ ESTÁ LA CORRECCIÓN CLAVE ===
             dd_cat.options = [ft.dropdown.Option(c) for c in opciones]
             dd_cat.value = cat_val
             actualizar_botones_categorias_menu()
@@ -245,6 +311,7 @@ def main(page: ft.Page):
     def inicializar_salon():
         grid_mesas.controls.clear()
         num_mesas = db.db_obtener_num_mesas()
+        logo_path = db.db_obtener_logo()
         
         for i in range(1, num_mesas + 1):
             if i not in cuentas:
@@ -256,10 +323,15 @@ def main(page: ft.Page):
             elif len(cuentas[i]) > 0:
                 color_fondo = "orange"
                 
+            contenido_mesa = [ft.Text(f"{i}", color="white", weight="bold", size=22)]
+            
+            if logo_path and os.path.exists(logo_path):
+                contenido_mesa.append(ft.Image(src=logo_path, width=70, height=70, fit="contain"))
+                
             grid_mesas.controls.append(
                 ft.Container(
-                    content=ft.Text(f"{i}", color="white", weight="bold"), 
-                    bgcolor=color_fondo, border_radius=10, padding=20, on_click=ir_a_pedido, data=i
+                    content=ft.Column(contenido_mesa, alignment="center", horizontal_alignment="center"), 
+                    bgcolor=color_fondo, border_radius=10, padding=10, on_click=ir_a_pedido, data=i
                 )
             )
 
@@ -341,7 +413,6 @@ def main(page: ft.Page):
 
     def ir_a_bloqueo_mesas(e):
         ocultar_todo()
-        # Precargamos el número de mesas en la caja de texto
         txt_config_num_mesas.value = str(db.db_obtener_num_mesas())
         refrescar_grid_bloqueo()
         v_bloqueo_mesas.visible = True
@@ -663,12 +734,11 @@ def main(page: ft.Page):
 
     columna_botones_acciones = ft.Column([ft.ElevatedButton("COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400), ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=validar_pago_antes_de_confirmar, width=400)])
     
-    page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest])
+    page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest, dlg_logo])
 
     v_login = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO ADMIN", size=40, weight="bold"), user_input, pass_input, ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=intentar_login), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
     v_login_bloqueo = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO A CONFIGURACIÓN", size=40, weight="bold"), user_input_bloqueo, pass_input_bloqueo, ft.ElevatedButton("ENTRAR", bgcolor="red", color="white", width=350, height=50, on_click=intentar_login_bloqueo), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
     
-    # LA VISTA DE ADMIN VUELVE A ESTAR LIMPIA Y ORDENADA
     v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([txt_config_tablet_id, ft.ElevatedButton("GUARDAR ID", on_click=validar_y_guardar_id), ft.ElevatedButton("VER REPORTES", bgcolor="green", color="white", on_click=ir_a_visor_reportes), ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales), ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu), ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]), ft.TextButton("SALIR", on_click=ir_a_mesas)], scroll="auto")], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
     
     v_gestion_menu = ft.Container(content=ft.Column([
@@ -685,10 +755,14 @@ def main(page: ft.Page):
     v_credenciales = ft.Container(content=ft.Column([ft.Row([ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Column([txt_nuevo_usr, txt_nuevo_pwd, ft.ElevatedButton("GUARDAR CAMBIOS", on_click=guardar_nuevas_credenciales, bgcolor="green", color="white", width=350, height=50), txt_mensaje_credenciales], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), visible=False, expand=True, padding=30, bgcolor="white")
     v_visor_reportes = ft.Container(content=ft.Column([ft.Row([ft.Text("HISTORIAL DE CORTES (EXCEL)", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Row([col_lista_archivos, ft.VerticalDivider(), contenedor_tabla_excel], expand=True, vertical_alignment=ft.CrossAxisAlignment.START)]), visible=False, expand=True, padding=30, bgcolor="white")
     
-    # LA NUEVA VISTA DE CONFIGURACIÓN DE MESAS
     v_bloqueo_mesas = ft.Container(content=ft.Column([
         ft.Row([ft.Text("CONFIGURACIÓN DE MESAS", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"), 
-        ft.Row([txt_config_num_mesas, ft.ElevatedButton("ACTUALIZAR CANTIDAD", bgcolor="blue", color="white", on_click=guardar_num_mesas)]),
+        ft.Row([
+            txt_config_num_mesas, 
+            ft.ElevatedButton("ACTUALIZAR CANTIDAD", bgcolor="blue", color="white", on_click=guardar_num_mesas),
+            ft.ElevatedButton("CAMBIAR LOGO", bgcolor="purple", color="white", on_click=lambda _: [setattr(txt_logo_url, 'value', ''), setattr(txt_estado_descarga, 'value', ''), setattr(dlg_logo, 'open', True), page.update()]),
+            ft.ElevatedButton("BORRAR LOGO", bgcolor="red", color="white", on_click=borrar_logo)
+        ], scroll="auto"),
         ft.Text("Toca una mesa para cambiar su estado. Verde = Libre | Rojo = Bloqueada", color="grey"), 
         ft.Divider(), 
         grid_bloqueo

@@ -47,7 +47,6 @@ def init_db():
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('tablet_id', '01')")
 
-    # NUEVO: CONFIGURACIÓN DE NÚMERO DE MESAS
     cursor.execute("SELECT valor FROM configuracion WHERE clave='num_mesas'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('num_mesas', '20')")
@@ -60,6 +59,11 @@ def init_db():
     cursor.execute("SELECT valor FROM configuracion WHERE clave='mesas_bloqueadas'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('mesas_bloqueadas', '')")
+
+    # NUEVO: RUTA DEL LOGO
+    cursor.execute("SELECT valor FROM configuracion WHERE clave='logo_path'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('logo_path', '')")
 
     cursor.execute("SELECT count(*) FROM categorias")
     if cursor.fetchone()[0] == 0:
@@ -149,6 +153,18 @@ def db_actualizar_num_mesas(num):
     conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='num_mesas'", (str(num),))
     conn.commit(); conn.close()
 
+# NUEVO: LÓGICA DE LOGO
+def db_obtener_logo():
+    conn = get_db_connection()
+    res = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='logo_path'").fetchone()
+    conn.close()
+    return res[0] if res else ""
+
+def db_actualizar_logo(ruta):
+    conn = get_db_connection()
+    conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='logo_path'", (ruta,))
+    conn.commit(); conn.close()
+
 def db_obtener_credenciales():
     conn = get_db_connection()
     usr = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='admin_usr'").fetchone()
@@ -234,10 +250,8 @@ def db_cargar_estado_inicial():
     filas = conn.cursor().execute("SELECT mesa_id, nombre, precio, cantidad, destino, enviado FROM items_activos").fetchall()
     conn.close()
     
-    # Creamos diccionarios según la cantidad configurada
     datos = {i: [] for i in range(1, num_mesas + 1)}
     
-    # Aseguramos que si hay mesas con órdenes viejas (superiores a la nueva cantidad), no crashee
     for f in filas: 
         if f[0] not in datos:
             datos[f[0]] = []
