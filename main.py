@@ -2,6 +2,7 @@ import flet as ft
 from datetime import datetime
 import os
 import urllib.request
+import socket # NUEVO: Para enviar tickets a la impresora
 import database as db
 import reports as rp
 
@@ -67,7 +68,12 @@ def main(page: ft.Page):
     user_input = ft.TextField(label="Usuario", width=350)
     pass_input = ft.TextField(label="Contraseña", password=True, width=350)
     txt_config_tablet_id = ft.TextField(label="ID Tablet", width=120, input_filter=ft.NumbersOnlyInputFilter(), text_align="center")
-    txt_config_num_mesas = ft.TextField(label="Núm. Mesas", width=150, input_filter=ft.NumbersOnlyInputFilter(), text_align="center")
+    txt_config_num_mesas = ft.TextField(label="Núm. Mesas", width=120, input_filter=ft.NumbersOnlyInputFilter(), text_align="center")
+    
+    # CONTROLES DE IP DE IMPRESORAS
+    ips_guardadas = db.db_obtener_ips()
+    txt_ip_barra = ft.TextField(label="IP Impresora Barra", width=160, value=ips_guardadas[0])
+    txt_ip_cocina = ft.TextField(label="IP Impresora Cocina", width=160, value=ips_guardadas[1])
     
     txt_mensaje_error_gestion = ft.Text("", size=18, weight="bold", expand=True, text_align="center")
     txt_nuevo_usr = ft.TextField(label="Nombre Usuario", width=350)
@@ -108,7 +114,7 @@ def main(page: ft.Page):
     columna_botones_acciones = None
 
     # =======================================================
-    # 1.5 LÓGICA DE CARGA DE LOGO (VÍA URL + BORRADO)
+    # 1.5 LÓGICA DE CARGA DE LOGO
     # =======================================================
     txt_logo_url = ft.TextField(label="Enlace (URL) de la imagen", width=350)
     txt_estado_descarga = ft.Text("")
@@ -122,7 +128,6 @@ def main(page: ft.Page):
             try:
                 ruta_db = db.get_db_path()
                 base_path = os.path.dirname(ruta_db)
-                
                 timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
                 nombre_archivo = f"logo_restaurante_{timestamp}.png"
                 ruta_destino = os.path.join(base_path, nombre_archivo)
@@ -147,10 +152,8 @@ def main(page: ft.Page):
     def borrar_logo(e):
         ruta_actual = db.db_obtener_logo()
         if ruta_actual and os.path.exists(ruta_actual):
-            try:
-                os.remove(ruta_actual)
-            except Exception:
-                pass
+            try: os.remove(ruta_actual)
+            except Exception: pass
         
         db.db_actualizar_logo("")
         inicializar_salon()
@@ -192,7 +195,6 @@ def main(page: ft.Page):
             cat_val = txt_nueva_cat.value.strip().upper()
             db.db_agregar_categoria(cat_val)
             opciones = db.db_obtener_categorias()
-            # === AQUÍ ESTÁ LA CORRECCIÓN CLAVE ===
             dd_cat.options = [ft.dropdown.Option(c) for c in opciones]
             dd_cat.value = cat_val
             actualizar_botones_categorias_menu()
@@ -314,26 +316,16 @@ def main(page: ft.Page):
         logo_path = db.db_obtener_logo()
         
         for i in range(1, num_mesas + 1):
-            if i not in cuentas:
-                cuentas[i] = [] 
-            
+            if i not in cuentas: cuentas[i] = [] 
             color_fondo = "blue"
-            if i in mesas_bloqueadas:
-                color_fondo = "grey"
-            elif len(cuentas[i]) > 0:
-                color_fondo = "orange"
+            if i in mesas_bloqueadas: color_fondo = "grey"
+            elif len(cuentas[i]) > 0: color_fondo = "orange"
                 
             contenido_mesa = [ft.Text(f"{i}", color="white", weight="bold", size=22)]
-            
             if logo_path and os.path.exists(logo_path):
                 contenido_mesa.append(ft.Image(src=logo_path, width=70, height=70, fit="contain"))
                 
-            grid_mesas.controls.append(
-                ft.Container(
-                    content=ft.Column(contenido_mesa, alignment="center", horizontal_alignment="center"), 
-                    bgcolor=color_fondo, border_radius=10, padding=10, on_click=ir_a_pedido, data=i
-                )
-            )
+            grid_mesas.controls.append(ft.Container(content=ft.Column(contenido_mesa, alignment="center", horizontal_alignment="center"), bgcolor=color_fondo, border_radius=10, padding=10, on_click=ir_a_pedido, data=i))
 
     def ir_a_mesas(e):
         ocultar_todo()
@@ -345,8 +337,7 @@ def main(page: ft.Page):
 
     def intentar_login(e):
         usr_bd, pwd_bd = db.db_obtener_credenciales()
-        if user_input.value == usr_bd and pass_input.value == pwd_bd:
-            ir_a_admin(None)
+        if user_input.value == usr_bd and pass_input.value == pwd_bd: ir_a_admin(None)
         else:
             page.snack_bar = ft.SnackBar(ft.Text("Usuario o contraseña incorrectos"), bgcolor="red")
             page.snack_bar.open = True
@@ -361,8 +352,7 @@ def main(page: ft.Page):
 
     def intentar_login_bloqueo(e):
         usr_bd, pwd_bd = db.db_obtener_credenciales()
-        if user_input_bloqueo.value == usr_bd and pass_input_bloqueo.value == pwd_bd:
-            ir_a_bloqueo_mesas(None)
+        if user_input_bloqueo.value == usr_bd and pass_input_bloqueo.value == pwd_bd: ir_a_bloqueo_mesas(None)
         else:
             page.snack_bar = ft.SnackBar(ft.Text("Usuario o contraseña incorrectos"), bgcolor="red")
             page.snack_bar.open = True
@@ -384,18 +374,14 @@ def main(page: ft.Page):
 
     def ir_a_credenciales(e):
         ocultar_todo()
-        txt_nuevo_usr.value = ""
-        txt_nuevo_pwd.value = ""
-        txt_mensaje_credenciales.value = ""
+        txt_nuevo_usr.value = ""; txt_nuevo_pwd.value = ""; txt_mensaje_credenciales.value = ""
         v_credenciales.visible = True
         page.update()
 
     def toggle_bloqueo_mesa(e):
         m_id = e.control.data
-        if m_id in mesas_bloqueadas:
-            mesas_bloqueadas.remove(m_id)
-        else:
-            mesas_bloqueadas.append(m_id)
+        if m_id in mesas_bloqueadas: mesas_bloqueadas.remove(m_id)
+        else: mesas_bloqueadas.append(m_id)
         db.db_actualizar_mesas_bloqueadas(mesas_bloqueadas)
         refrescar_grid_bloqueo()
 
@@ -405,15 +391,17 @@ def main(page: ft.Page):
         for i in range(1, num_mesas + 1):
             color = "red" if i in mesas_bloqueadas else "green"
             estado_txt = "BLOQUEADA" if i in mesas_bloqueadas else "LIBRE"
-            grid_bloqueo.controls.append(
-                ft.Container(content=ft.Column([ft.Text(f"MESA {i}", color="white", weight="bold", size=20), ft.Text(estado_txt, color="white", size=12)], alignment="center", horizontal_alignment="center"), 
-                             bgcolor=color, border_radius=10, padding=10, on_click=toggle_bloqueo_mesa, data=i)
-            )
+            grid_bloqueo.controls.append(ft.Container(content=ft.Column([ft.Text(f"MESA {i}", color="white", weight="bold", size=20), ft.Text(estado_txt, color="white", size=12)], alignment="center", horizontal_alignment="center"), bgcolor=color, border_radius=10, padding=10, on_click=toggle_bloqueo_mesa, data=i))
         page.update()
 
     def ir_a_bloqueo_mesas(e):
         ocultar_todo()
         txt_config_num_mesas.value = str(db.db_obtener_num_mesas())
+        # Cargar IPs actuales
+        ips = db.db_obtener_ips()
+        txt_ip_barra.value = ips[0]
+        txt_ip_cocina.value = ips[1]
+        
         refrescar_grid_bloqueo()
         v_bloqueo_mesas.visible = True
         page.update()
@@ -421,8 +409,7 @@ def main(page: ft.Page):
     def mostrar_contenido_excel(ruta):
         datos = rp.leer_excel(ruta)
         contenedor_tabla_excel.controls.clear()
-        if not datos:
-            contenedor_tabla_excel.controls.append(ft.Text("⚠️ Error al leer el archivo o archivo vacío.", color="red"))
+        if not datos: contenedor_tabla_excel.controls.append(ft.Text("⚠️ Error al leer el archivo o archivo vacío.", color="red"))
         else:
             max_cols = len(datos[0]) if datos else 5
             columnas = [ft.DataColumn(ft.Text(f"Col {i+1}", weight="bold")) for i in range(max_cols)]
@@ -431,9 +418,7 @@ def main(page: ft.Page):
                 row_limpia = row[:max_cols] + [""] * (max_cols - len(row))
                 celdas = [ft.DataCell(ft.Text(str(c))) for c in row_limpia]
                 filas_dt.append(ft.DataRow(cells=celdas))
-            
-            tabla = ft.DataTable(columns=columnas, rows=filas_dt, heading_row_color="black12", data_row_max_height=float("inf"), data_row_min_height=60)
-            contenedor_tabla_excel.controls.append(ft.Row([tabla], scroll="always"))
+            contenedor_tabla_excel.controls.append(ft.Row([ft.DataTable(columns=columnas, rows=filas_dt, heading_row_color="black12", data_row_max_height=float("inf"), data_row_min_height=60)], scroll="always"))
         page.update()
 
     def ir_a_visor_reportes(e):
@@ -447,14 +432,9 @@ def main(page: ft.Page):
             archivos = [f for f in os.listdir(ruta_reportes) if f.endswith('.xlsx')]
             archivos.sort(reverse=True)
             if archivos:
-                for arch in archivos:
-                    ruta_completa = os.path.join(ruta_reportes, arch)
-                    btn = ft.ElevatedButton(arch, on_click=lambda e, r=ruta_completa: mostrar_contenido_excel(r), width=300)
-                    col_lista_archivos.controls.append(btn)
-            else:
-                col_lista_archivos.controls.append(ft.Text("No hay reportes generados."))
-        else:
-            col_lista_archivos.controls.append(ft.Text("Carpeta no encontrada. Aún no se han hecho cortes."))
+                for arch in archivos: col_lista_archivos.controls.append(ft.ElevatedButton(arch, on_click=lambda e, r=os.path.join(ruta_reportes, arch): mostrar_contenido_excel(r), width=300))
+            else: col_lista_archivos.controls.append(ft.Text("No hay reportes generados."))
+        else: col_lista_archivos.controls.append(ft.Text("Carpeta no encontrada. Aún no se han hecho cortes."))
         v_visor_reportes.visible = True
         page.update()
 
@@ -475,9 +455,7 @@ def main(page: ft.Page):
         m_id = e.control.data
         if m_id in mesas_bloqueadas:
             page.snack_bar = ft.SnackBar(ft.Text(f"Acceso Denegado: La MESA {m_id} está bloqueada.", color="white"), bgcolor="red")
-            page.snack_bar.open = True
-            page.update()
-            return
+            page.snack_bar.open = True; page.update(); return
         ocultar_todo(); estado["mesa"] = m_id
         txt_titulo_mesa.value = f"MESA #{estado['mesa']}"
         v_pedido.visible = True
@@ -498,17 +476,21 @@ def main(page: ft.Page):
             page.snack_bar.open = True
         page.update()
 
-    def guardar_num_mesas(e):
+    def guardar_ajustes_salon(e):
         n_mesas = txt_config_num_mesas.value
+        ip_b = txt_ip_barra.value.strip()
+        ip_c = txt_ip_cocina.value.strip()
+        
         if n_mesas.isdigit() and int(n_mesas) > 0:
             mesas_final = int(n_mesas)
             db.db_actualizar_num_mesas(mesas_final)
+            db.db_actualizar_ips(ip_b, ip_c)
             txt_config_num_mesas.value = str(mesas_final)
             
             inicializar_salon()
             refrescar_grid_bloqueo()
             
-            page.snack_bar = ft.SnackBar(ft.Text(f"Ajustes Guardados. El salón ahora tiene {mesas_final} mesas."), bgcolor="green")
+            page.snack_bar = ft.SnackBar(ft.Text(f"Ajustes Guardados."), bgcolor="green")
             page.snack_bar.open = True
         else:
             page.snack_bar = ft.SnackBar(ft.Text("Error: Ingresa un número de mesas válido"), bgcolor="red")
@@ -520,13 +502,11 @@ def main(page: ft.Page):
         if not txt_nuevo_usr.value or not txt_nuevo_pwd.value:
             txt_mensaje_credenciales.value = "⚠️ Completa ambos campos"
             txt_mensaje_credenciales.color = "red"
-            page.update()
-            return
+            page.update(); return
         db.db_actualizar_credenciales(txt_nuevo_usr.value, txt_nuevo_pwd.value)
         txt_mensaje_credenciales.value = "¡Usuario administrador actualizado correctamente!"
         txt_mensaje_credenciales.color = "green"
-        txt_nuevo_usr.value = ""
-        txt_nuevo_pwd.value = ""
+        txt_nuevo_usr.value = ""; txt_nuevo_pwd.value = ""
         page.update()
 
     def agregar_item(n, p, d):
@@ -549,12 +529,52 @@ def main(page: ft.Page):
                 break
         refrescar_ticket()
 
+    # =======================================================
+    # EL MOTOR DE IMPRESIÓN POR RED (Sockets)
+    # =======================================================
+    def enviar_ticket_red(ip, destino, items, mesa):
+        if not items: return
+        
+        # Construimos el diseño del ticket en texto plano
+        ticket = f"\n=== ORDEN PARA {destino} ===\n"
+        ticket += f"MESA: {mesa}\n"
+        ticket += f"FECHA: {datetime.now().strftime('%H:%M:%S')}\n"
+        ticket += "-" * 28 + "\n"
+        for it in items:
+            ticket += f"{it['q']}x {it['n']}\n"
+        ticket += "-" * 28 + "\n\n\n"
+        
+        try:
+            # Nos conectamos a la IP en el puerto de impresoras (9100)
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2.0) # Espera máximo 2 segundos para no trabar la app
+            s.connect((ip, 9100))
+            s.sendall(ticket.encode('utf-8'))
+            s.close()
+        except Exception as ex:
+            print(f"Error interno al imprimir en {destino} ({ip}): {ex}")
+            # Si falla, imprimimos en consola pero no le estorbamos al mesero
+
     def enviar_comanda(e):
-        m_id = estado["mesa"]; nuevos = [i for i in cuentas[m_id] if not i["enviado"]]
-        if not nuevos: mostrar_mensaje_central("AVISO:\nNo hay productos nuevos.", "orange"); return
+        m_id = estado["mesa"]
+        nuevos = [i for i in cuentas[m_id] if not i["enviado"]]
+        if not nuevos: 
+            mostrar_mensaje_central("AVISO:\nNo hay productos nuevos.", "orange")
+            return
+        
+        # Separamos los productos según a dónde tienen que ir
+        items_barra = [i for i in nuevos if i["d"] == "BARRA"]
+        items_cocina = [i for i in nuevos if i["d"] == "COCINA"]
+        
+        # Obtenemos las IPs y disparamos los tickets por red
+        ip_barra, ip_cocina = db.db_obtener_ips()
+        enviar_ticket_red(ip_barra, "BARRA", items_barra, m_id)
+        enviar_ticket_red(ip_cocina, "COCINA", items_cocina, m_id)
+
         db.db_marcar_enviados(m_id)
         for i in cuentas[m_id]: i["enviado"] = True
-        refrescar_ticket(); mostrar_mensaje_central("¡ORDEN ENVIADA!", "green")
+        refrescar_ticket()
+        mostrar_mensaje_central("¡ORDEN ENVIADA A COCINA/BARRA!", "green")
 
     def validar_pago_antes_de_confirmar(e):
         mesa_actual = cuentas[estado["mesa"]]
@@ -573,16 +593,10 @@ def main(page: ft.Page):
             m_id = estado["mesa"]
             total = sum(i['p']*i['q'] for i in cuentas[m_id])
             efe = 0.0 if txt_mixto_efectivo.value == "" else float(txt_mixto_efectivo.value)
-            
-            if efe > total or efe < 0:
-                txt_mixto_error.value = "⚠️ El efectivo no puede ser mayor al total"
-                txt_mixto_tarjeta.value = "0.0"
-            else:
-                txt_mixto_error.value = ""
-                txt_mixto_tarjeta.value = str(round(total - efe, 2))
+            if efe > total or efe < 0: txt_mixto_error.value = "⚠️ El efectivo no puede ser mayor al total"; txt_mixto_tarjeta.value = "0.0"
+            else: txt_mixto_error.value = ""; txt_mixto_tarjeta.value = str(round(total - efe, 2))
         except ValueError:
-            txt_mixto_error.value = "⚠️ Ingresa un número válido"
-            txt_mixto_tarjeta.value = "0.0"
+            txt_mixto_error.value = "⚠️ Ingresa un número válido"; txt_mixto_tarjeta.value = "0.0"
         page.update()
 
     txt_mixto_efectivo.on_change = actualizar_tarjeta_mixto
@@ -592,78 +606,52 @@ def main(page: ft.Page):
         m_id = estado["mesa"]
         total = sum(i['p']*i['q'] for i in cuentas[m_id])
         txt_mixto_total.value = f"TOTAL A PAGAR: ${total}"
-        txt_mixto_efectivo.value = ""
-        txt_mixto_tarjeta.value = str(total)
-        txt_mixto_error.value = ""
-        v_pago_mixto.visible = True
-        page.update()
+        txt_mixto_efectivo.value = ""; txt_mixto_tarjeta.value = str(total); txt_mixto_error.value = ""
+        v_pago_mixto.visible = True; page.update()
 
     def confirmar_pago_mixto(e):
         try:
             m_id = estado["mesa"]
             total = sum(i['p']*i['q'] for i in cuentas[m_id])
             if txt_mixto_error.value != "": return
-            
             efe = float(txt_mixto_efectivo.value) if txt_mixto_efectivo.value else 0.0
             tar = float(txt_mixto_tarjeta.value)
-            
             if round(efe + tar, 2) != round(total, 2):
-                txt_mixto_error.value = "⚠️ Los montos no cuadran con el total"
-                page.update(); return
-                
+                txt_mixto_error.value = "⚠️ Los montos no cuadran con el total"; page.update(); return
             metodo_string = f"Mixto:{efe}:{tar}"
             db.db_registrar_venta_final(m_id, "\n".join([f"• {i['q']}x {i['n']}" for i in cuentas[m_id]]), total, metodo_string)
-            db.db_limpiar_mesa(m_id)
-            cuentas[m_id] = []
-            
+            db.db_limpiar_mesa(m_id); cuentas[m_id] = []
             ocultar_todo()
             txt_mensaje_despedida.value = f"¡PAGO REGISTRADO!\nMixto (Efe: ${efe} | Tar: ${tar})"
-            v_pago_finalizado.visible = True
-            page.update()
-        except Exception as ex:
-            txt_mixto_error.value = "⚠️ Error en los datos ingresados"
-            page.update()
+            v_pago_finalizado.visible = True; page.update()
+        except Exception:
+            txt_mixto_error.value = "⚠️ Error en los datos ingresados"; page.update()
 
     def ejecutar_cierre_final(e):
         try:
             ventas = db.db_obtener_ventas_activas()
-            total_caja = sum(v[2] for v in ventas)
-            efe = 0.0
-            tar = 0.0
-            ventas_limpias = []
-            
+            total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0; ventas_limpias = []
             for v in ventas:
                 metodo = v[4]
-                if metodo.lower() == "efectivo":
-                    efe += v[2]
-                    ventas_limpias.append(v)
-                elif metodo.lower() == "tarjeta":
-                    tar += v[2]
-                    ventas_limpias.append(v)
+                if metodo.lower() == "efectivo": efe += v[2]; ventas_limpias.append(v)
+                elif metodo.lower() == "tarjeta": tar += v[2]; ventas_limpias.append(v)
                 elif metodo.startswith("Mixto:"):
                     partes = metodo.split(":")
-                    efe += float(partes[1])
-                    tar += float(partes[2])
-                    texto_metodo = "Mixto"
-                    ventas_limpias.append((v[0], v[1], v[2], v[3], texto_metodo))
-                else:
-                    ventas_limpias.append(v)
+                    efe += float(partes[1]); tar += float(partes[2])
+                    ventas_limpias.append((v[0], v[1], v[2], v[3], "Mixto"))
+                else: ventas_limpias.append(v)
 
             rp.generar_excel_cierre(ventas_limpias, total_caja, efe, tar, db.db_obtener_tablet_id())
             db.db_ejecutar_cierre_caja()
-            
             v_confirm_cierre.visible = False
             txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
             txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"
             txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
             txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"
-            v_resumen_cierre.visible = True
-            page.update()
+            v_resumen_cierre.visible = True; page.update()
         except Exception as ex:
             v_confirm_cierre.visible = False
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error al generar reporte: {str(ex)}"), bgcolor="red")
-            page.snack_bar.open = True
-            page.update()
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error al generar reporte: {str(ex)}"), bgcolor="red"); page.snack_bar.open = True; page.update()
 
     def actualizar_reporte_admin():
         ventas = db.db_obtener_ventas_activas(); col_reportes_dia.controls.clear()
@@ -672,9 +660,7 @@ def main(page: ft.Page):
             if metodo.startswith("Mixto:"):
                 partes = metodo.split(":")
                 texto_metodo = f"MIXTO (E:${partes[1]} | T:${partes[2]})"
-            else:
-                texto_metodo = f"PAGO: {metodo.upper()}"
-                
+            else: texto_metodo = f"PAGO: {metodo.upper()}"
             col_reportes_dia.controls.append(ft.Container(content=ft.Column([ft.Row([ft.Text(f"MESA {v[0]}", weight="bold", size=18), ft.Text(texto_metodo, color="blue", weight="bold")], alignment="spaceBetween"), ft.Text("Productos:", weight="bold"), ft.Text(v[1], italic=True, color="grey"), ft.Row([ft.Text(f"Total: ${v[2]}", color="green", weight="bold"), ft.Text(f"Hora: {v[3]}", size=12)], alignment="spaceBetween")]), padding=15, border=ft.border.all(1, "grey"), border_radius=10, margin=ft.margin.only(bottom=10)))
         txt_ingreso_total_dia.value = f"TOTAL EN CAJA: ${sum(x[2] for x in ventas)}"; page.update()
 
@@ -694,38 +680,22 @@ def main(page: ft.Page):
     def intentar_agregar_producto(e):
         txt_mensaje_error_gestion.value = ""
         if not txt_nom.value or not txt_pre.value or not dd_cat.value or not dd_dest.value:
-            txt_mensaje_error_gestion.value = "Completa todos los campos"
-            txt_mensaje_error_gestion.color = "red"
-            page.update()
-            return
-        try:
-            float(txt_pre.value)
-        except ValueError:
-            txt_mensaje_error_gestion.value = "El precio debe ser un número válido"
-            txt_mensaje_error_gestion.color = "red"
-            page.update()
-            return
+            txt_mensaje_error_gestion.value = "Completa todos los campos"; txt_mensaje_error_gestion.color = "red"; page.update(); return
+        try: float(txt_pre.value)
+        except ValueError: txt_mensaje_error_gestion.value = "El precio debe ser un número válido"; txt_mensaje_error_gestion.color = "red"; page.update(); return
         db.db_agregar_producto(txt_nom.value, txt_pre.value, dd_cat.value, dd_dest.value)
         txt_nom.value = ""; txt_pre.value = ""; refrescar_lista_gestion()
-        txt_mensaje_error_gestion.value = "¡Producto añadido con éxito!"; txt_mensaje_error_gestion.color = "green"
-        page.update()
+        txt_mensaje_error_gestion.value = "¡Producto añadido con éxito!"; txt_mensaje_error_gestion.color = "green"; page.update()
 
     def intentar_actualizar_precio(idx, valor_texto):
         txt_mensaje_error_gestion.value = ""
-        if not valor_texto:
-            txt_mensaje_error_gestion.value = "El precio no puede estar vacío"
-            txt_mensaje_error_gestion.color = "red"
-            page.update(); return
+        if not valor_texto: txt_mensaje_error_gestion.value = "El precio no puede estar vacío"; txt_mensaje_error_gestion.color = "red"; page.update(); return
         try:
             precio_valido = float(valor_texto)
             db.db_actualizar_precio_producto(idx, precio_valido)
             refrescar_lista_gestion()
-            txt_mensaje_error_gestion.value = "¡Precio actualizado!"; txt_mensaje_error_gestion.color = "green"
-            page.update()
-        except ValueError:
-            txt_mensaje_error_gestion.value = "El precio debe ser un número"
-            txt_mensaje_error_gestion.color = "red"
-            page.update()
+            txt_mensaje_error_gestion.value = "¡Precio actualizado!"; txt_mensaje_error_gestion.color = "green"; page.update()
+        except ValueError: txt_mensaje_error_gestion.value = "El precio debe ser un número"; txt_mensaje_error_gestion.color = "red"; page.update()
 
     # ==========================================
     # 3. CONSTRUCCIÓN DE LA INTERFAZ FINAL
@@ -743,12 +713,7 @@ def main(page: ft.Page):
     
     v_gestion_menu = ft.Container(content=ft.Column([
         ft.Row([ft.Text("GESTIONAR PRODUCTOS", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin), txt_mensaje_error_gestion]), 
-        ft.Row([
-            txt_nom, txt_pre, 
-            dd_cat, col_btns_cat, 
-            dd_dest, col_btns_dest, 
-            ft.ElevatedButton("AÑADIR", on_click=intentar_agregar_producto, bgcolor="green", color="white", height=62)
-        ], vertical_alignment=ft.CrossAxisAlignment.CENTER), 
+        ft.Row([txt_nom, txt_pre, dd_cat, col_btns_cat, dd_dest, col_btns_dest, ft.ElevatedButton("AÑADIR", on_click=intentar_agregar_producto, bgcolor="green", color="white", height=62)], vertical_alignment=ft.CrossAxisAlignment.CENTER), 
         ft.Divider(), col_lista_prods
     ]), visible=False, expand=True, padding=30, bgcolor="white")
     
@@ -759,7 +724,9 @@ def main(page: ft.Page):
         ft.Row([ft.Text("CONFIGURACIÓN DE MESAS", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"), 
         ft.Row([
             txt_config_num_mesas, 
-            ft.ElevatedButton("ACTUALIZAR CANTIDAD", bgcolor="blue", color="white", on_click=guardar_num_mesas),
+            txt_ip_barra,
+            txt_ip_cocina,
+            ft.ElevatedButton("GUARDAR AJUSTES", bgcolor="blue", color="white", on_click=guardar_ajustes_salon),
             ft.ElevatedButton("CAMBIAR LOGO", bgcolor="purple", color="white", on_click=lambda _: [setattr(txt_logo_url, 'value', ''), setattr(txt_estado_descarga, 'value', ''), setattr(dlg_logo, 'open', True), page.update()]),
             ft.ElevatedButton("BORRAR LOGO", bgcolor="red", color="white", on_click=borrar_logo)
         ], scroll="auto"),
