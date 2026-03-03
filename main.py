@@ -2,7 +2,8 @@ import flet as ft
 from datetime import datetime
 import os
 import urllib.request
-import socket # NUEVO: Para enviar tickets a la impresora
+import socket
+import unicodedata
 import database as db
 import reports as rp
 
@@ -530,30 +531,54 @@ def main(page: ft.Page):
         refrescar_ticket()
 
     # =======================================================
-    # EL MOTOR DE IMPRESIÓN POR RED (Sockets)
+    # EL MOTOR DE IMPRESIÓN POR RED (Sockets + ESC/POS)
     # =======================================================
+    def limpiar_texto(texto):
+        # Evitamos que la impresora imprima basura china por culpa de acentos o la 'ñ'
+        texto = texto.replace('ñ', 'n').replace('Ñ', 'N')
+        return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+
     def enviar_ticket_red(ip, destino, items, mesa):
         if not items: return
         
-        # Construimos el diseño del ticket en texto plano
-        ticket = f"\n=== ORDEN PARA {destino} ===\n"
-        ticket += f"MESA: {mesa}\n"
-        ticket += f"FECHA: {datetime.now().strftime('%H:%M:%S')}\n"
-        ticket += "-" * 28 + "\n"
-        for it in items:
-            ticket += f"{it['q']}x {it['n']}\n"
-        ticket += "-" * 28 + "\n\n\n"
+        # 1. DICCIONARIO DE COMANDOS ELÉCTRICOS (ESC/POS)
+        INIT = b'\x1B\x40'          # Despierta y resetea la impresora
+        BOLD_ON = b'\x1B\x45\x01'   # Enciende las letras Negritas
+        BOLD_OFF = b'\x1B\x45\x00'  # Apaga las letras Negritas
+        CENTER = b'\x1B\x61\x01'    # Centra el texto
+        LEFT = b'\x1B\x61\x00'      # Alinea el texto a la izquierda
+        CUT = b'\x1D\x56\x00'       # Activa la cuchilla para cortar el papel
+        LF = b'\x0A'                # Salto de línea (Enter)
         
+        # 2. CONSTRUCCIÓN DEL TICKET (Mezclando comandos invisibles con texto)
+        ticket = INIT
+        ticket += CENTER + BOLD_ON
+        ticket += f"=== ORDEN PARA {destino} ===\n".encode('ascii', errors='ignore')
+        ticket += f"MESA: {mesa}\n".encode('ascii', errors='ignore')
+        ticket += f"FECHA: {datetime.now().strftime('%H:%M:%S')}\n".encode('ascii', errors='ignore')
+        ticket += BOLD_OFF + LEFT
+        ticket += ("-" * 32 + "\n").encode('ascii', errors='ignore')
+        
+        # Agregamos los productos limpios de acentos
+        for it in items:
+            nombre_limpio = limpiar_texto(it['n'])
+            ticket += f"{it['q']}x {nombre_limpio}\n".encode('ascii', errors='ignore')
+            
+        ticket += ("-" * 32 + "\n").encode('ascii', errors='ignore')
+        
+        # 3. FINALIZACIÓN Y CORTE
+        ticket += LF * 4  # Avanzamos el papel 4 líneas para que el corte no mutile el texto
+        ticket += CUT     # ¡Guillotinazo!
+        
+        # 4. DISPARO POR LA RED
         try:
-            # Nos conectamos a la IP en el puerto de impresoras (9100)
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2.0) # Espera máximo 2 segundos para no trabar la app
+            s.settimeout(2.0)
             s.connect((ip, 9100))
-            s.sendall(ticket.encode('utf-8'))
+            s.sendall(ticket) # Enviamos el paquete de bytes crudos
             s.close()
         except Exception as ex:
             print(f"Error interno al imprimir en {destino} ({ip}): {ex}")
-            # Si falla, imprimimos en consola pero no le estorbamos al mesero
 
     def enviar_comanda(e):
         m_id = estado["mesa"]
