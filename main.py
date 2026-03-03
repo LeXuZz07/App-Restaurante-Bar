@@ -71,7 +71,6 @@ def main(page: ft.Page):
     txt_config_tablet_id = ft.TextField(label="ID Tablet", width=120, input_filter=ft.NumbersOnlyInputFilter(), text_align="center")
     txt_config_num_mesas = ft.TextField(label="Núm. Mesas", width=120, input_filter=ft.NumbersOnlyInputFilter(), text_align="center")
     
-    # CONTROLES DE IP DE IMPRESORAS
     ips_guardadas = db.db_obtener_ips()
     txt_ip_barra = ft.TextField(label="IP Impresora Barra", width=160, value=ips_guardadas[0])
     txt_ip_cocina = ft.TextField(label="IP Impresora Cocina", width=160, value=ips_guardadas[1])
@@ -99,7 +98,9 @@ def main(page: ft.Page):
     dd_dest = ft.Dropdown(label="Destino", width=150, options=[ft.dropdown.Option(d) for d in lista_dest], value=lista_dest[0] if lista_dest else None)
     
     col_lista_prods = ft.Column(scroll="always", expand=True)
+    
     txt_titulo_mesa = ft.Text("", size=25, weight="bold")
+    switch_llevar = ft.Switch(label="🥡 PARA LLEVAR", value=False, active_color="orange", label_position=ft.LabelPosition.LEFT)
     col_ticket = ft.Column(scroll="always", expand=True)
     txt_total = ft.Text("TOTAL: $0", size=35, weight="bold", color="green")
     grid_prods = ft.Column(expand=True)
@@ -398,7 +399,6 @@ def main(page: ft.Page):
     def ir_a_bloqueo_mesas(e):
         ocultar_todo()
         txt_config_num_mesas.value = str(db.db_obtener_num_mesas())
-        # Cargar IPs actuales
         ips = db.db_obtener_ips()
         txt_ip_barra.value = ips[0]
         txt_ip_cocina.value = ips[1]
@@ -458,6 +458,9 @@ def main(page: ft.Page):
             page.snack_bar = ft.SnackBar(ft.Text(f"Acceso Denegado: La MESA {m_id} está bloqueada.", color="white"), bgcolor="red")
             page.snack_bar.open = True; page.update(); return
         ocultar_todo(); estado["mesa"] = m_id
+        
+        switch_llevar.value = False 
+        
         txt_titulo_mesa.value = f"MESA #{estado['mesa']}"
         v_pedido.visible = True
         mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
@@ -510,6 +513,7 @@ def main(page: ft.Page):
         txt_nuevo_usr.value = ""; txt_nuevo_pwd.value = ""
         page.update()
 
+    # RESTAURADO: agregar_item ya no ensucia el nombre del producto
     def agregar_item(n, p, d):
         m = estado["mesa"]; found = False
         for it in cuentas[m]:
@@ -534,52 +538,53 @@ def main(page: ft.Page):
     # EL MOTOR DE IMPRESIÓN POR RED (Sockets + ESC/POS)
     # =======================================================
     def limpiar_texto(texto):
-        # Evitamos que la impresora imprima basura china por culpa de acentos o la 'ñ'
         texto = texto.replace('ñ', 'n').replace('Ñ', 'N')
         return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
 
-    def enviar_ticket_red(ip, destino, items, mesa):
+    # MODIFICADO: Ahora recibe el parámetro tipo_orden
+    def enviar_ticket_red(ip, destino, items, mesa, tipo_orden):
         if not items: return
         
-        # 1. DICCIONARIO DE COMANDOS ELÉCTRICOS (ESC/POS)
-        INIT = b'\x1B\x40'          # Despierta y resetea la impresora
-        BOLD_ON = b'\x1B\x45\x01'   # Enciende las letras Negritas
-        BOLD_OFF = b'\x1B\x45\x00'  # Apaga las letras Negritas
-        CENTER = b'\x1B\x61\x01'    # Centra el texto
-        LEFT = b'\x1B\x61\x00'      # Alinea el texto a la izquierda
-        CUT = b'\x1D\x56\x00'       # Activa la cuchilla para cortar el papel
-        LF = b'\x0A'                # Salto de línea (Enter)
+        INIT = b'\x1B\x40'          
+        BOLD_ON = b'\x1B\x45\x01'   
+        BOLD_OFF = b'\x1B\x45\x00'  
+        CENTER = b'\x1B\x61\x01'    
+        LEFT = b'\x1B\x61\x00'      
+        CUT = b'\x1D\x56\x00'       
+        LF = b'\x0A'                
         
-        # 2. CONSTRUCCIÓN DEL TICKET (Mezclando comandos invisibles con texto)
         ticket = INIT
         ticket += CENTER + BOLD_ON
         ticket += f"=== ORDEN PARA {destino} ===\n".encode('ascii', errors='ignore')
+        
+        # Inyección del título dinámico ("PARA LLEVAR" o "COMER AQUI")
+        tipo_limpio = limpiar_texto(tipo_orden)
+        ticket += f">> {tipo_limpio} <<\n".encode('ascii', errors='ignore')
+        
         ticket += f"MESA: {mesa}\n".encode('ascii', errors='ignore')
         ticket += f"FECHA: {datetime.now().strftime('%H:%M:%S')}\n".encode('ascii', errors='ignore')
         ticket += BOLD_OFF + LEFT
         ticket += ("-" * 32 + "\n").encode('ascii', errors='ignore')
         
-        # Agregamos los productos limpios de acentos
         for it in items:
             nombre_limpio = limpiar_texto(it['n'])
             ticket += f"{it['q']}x {nombre_limpio}\n".encode('ascii', errors='ignore')
             
         ticket += ("-" * 32 + "\n").encode('ascii', errors='ignore')
         
-        # 3. FINALIZACIÓN Y CORTE
-        ticket += LF * 4  # Avanzamos el papel 4 líneas para que el corte no mutile el texto
-        ticket += CUT     # ¡Guillotinazo!
+        ticket += LF * 4  
+        ticket += CUT     
         
-        # 4. DISPARO POR LA RED
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(2.0)
             s.connect((ip, 9100))
-            s.sendall(ticket) # Enviamos el paquete de bytes crudos
+            s.sendall(ticket) 
             s.close()
         except Exception as ex:
             print(f"Error interno al imprimir en {destino} ({ip}): {ex}")
 
+    # MODIFICADO: Evalúa el switch y envía el texto adecuado a las impresoras
     def enviar_comanda(e):
         m_id = estado["mesa"]
         nuevos = [i for i in cuentas[m_id] if not i["enviado"]]
@@ -587,14 +592,18 @@ def main(page: ft.Page):
             mostrar_mensaje_central("AVISO:\nNo hay productos nuevos.", "orange")
             return
         
-        # Separamos los productos según a dónde tienen que ir
         items_barra = [i for i in nuevos if i["d"] == "BARRA"]
         items_cocina = [i for i in nuevos if i["d"] == "COCINA"]
         
-        # Obtenemos las IPs y disparamos los tickets por red
+        if switch_llevar.value:
+            texto_tipo = "EMPAQUETADO PARA LLEVAR"
+        else:
+            texto_tipo = "PARA COMER AQUI"
+        
         ip_barra, ip_cocina = db.db_obtener_ips()
-        enviar_ticket_red(ip_barra, "BARRA", items_barra, m_id)
-        enviar_ticket_red(ip_cocina, "COCINA", items_cocina, m_id)
+        
+        enviar_ticket_red(ip_barra, "BARRA", items_barra, m_id, texto_tipo)
+        enviar_ticket_red(ip_cocina, "COCINA", items_cocina, m_id, texto_tipo)
 
         db.db_marcar_enviados(m_id)
         for i in cuentas[m_id]: i["enviado"] = True
@@ -762,7 +771,7 @@ def main(page: ft.Page):
     
     v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("SALÓN", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
     
-    v_pedido = ft.Container(content=ft.Row([ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), row_categorias_menu, grid_prods], expand=3), ft.Container(content=ft.Column([txt_titulo_mesa, ft.Divider(), col_ticket, ft.Divider(), txt_total, columna_botones_acciones]), expand=2, bgcolor="#F5F5F5", padding=20, border_radius=15)]), expand=True, visible=False, bgcolor="white")
+    v_pedido = ft.Container(content=ft.Row([ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), row_categorias_menu, grid_prods], expand=3), ft.Container(content=ft.Column([ft.Row([txt_titulo_mesa, switch_llevar], alignment="spaceBetween"), ft.Divider(), col_ticket, ft.Divider(), txt_total, columna_botones_acciones]), expand=2, bgcolor="#F5F5F5", padding=20, border_radius=15)]), expand=True, visible=False, bgcolor="white")
     
     v_confirmacion = ft.Container(content=ft.Row([ft.Column([ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"), ft.Row([ft.ElevatedButton("SÍ, PAGAR", bgcolor="green", color="white", on_click=lambda _: [col_resumen_final.controls.clear(), [col_resumen_final.controls.append(ft.Text(f"{i['q']}x {i['n']} ... ${i['p']*i['q']}")) for i in cuentas[estado['mesa']]], setattr(v_ticket_final, 'visible', True), setattr(v_confirmacion, 'visible', False), setattr(columna_botones_acciones, 'visible', False), page.update()], width=180, height=60), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirmacion, 'visible', False), page.update()], width=180, height=60)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="rgba(255,255,255,0.9)")
     col_resumen_final = ft.Column(scroll="always", expand=True)
