@@ -4,6 +4,7 @@ import os
 import urllib.request
 import socket
 import unicodedata
+import shutil  # <--- NUEVA LIBRERÍA PARA EXPORTAR
 import database as db
 import reports as rp
 
@@ -81,8 +82,20 @@ def main(page: ft.Page):
     txt_mensaje_credenciales = ft.Text("", size=18, weight="bold", text_align="center")
     user_input_bloqueo = ft.TextField(label="Usuario Admin", width=350)
     pass_input_bloqueo = ft.TextField(label="Contraseña", password=True, width=350)
+    
+    # -----------------------------------------------
+    # NUEVOS CONTROLES PARA EL PANEL DE REPORTES
+    # -----------------------------------------------
+    reporte_seleccionado = {"ruta": None}
     col_lista_archivos = ft.Column(scroll="always", expand=1)
-    contenedor_tabla_excel = ft.Column(scroll="always", expand=3)
+    contenedor_tabla_excel = ft.Column(scroll="always", expand=True)
+    
+    txt_ip_pc = ft.TextField(label="IP PC (Destino Excel)", width=250)
+    btn_enviar_pc = ft.ElevatedButton("📤 ENVIAR A PC", disabled=True, bgcolor="blue", color="white", height=45)
+    btn_exportar_local = ft.ElevatedButton("📥 EXPORTAR LOCAL", disabled=True, bgcolor="green", color="white", height=45)
+    btn_eliminar_reporte = ft.ElevatedButton("🗑️ ELIMINAR", disabled=True, bgcolor="red", color="white", height=45)
+    # -----------------------------------------------
+
     grid_mesas = ft.GridView(expand=True, runs_count=5, spacing=15)
     grid_bloqueo = ft.GridView(expand=True, runs_count=5, spacing=15)
     col_reportes_dia = ft.Column(scroll="always", expand=True)
@@ -407,6 +420,96 @@ def main(page: ft.Page):
         v_bloqueo_mesas.visible = True
         page.update()
 
+    # =======================================================
+    # LÓGICA DEL PANEL DE ADMINISTRACIÓN DE REPORTES (BYPASS INCLUIDO)
+    # =======================================================
+    def guardar_ip_pc_en_cache(e):
+        # Bypass: Guardamos la IP en un archivo de texto seguro
+        ruta_ip = os.path.join(os.path.dirname(db.get_db_path()), "ip_pc_config.txt")
+        try:
+            with open(ruta_ip, "w") as f:
+                f.write(txt_ip_pc.value.strip())
+            page.snack_bar = ft.SnackBar(ft.Text("¡IP de la computadora guardada!"), bgcolor="green")
+        except Exception as ex:
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error al guardar IP: {ex}"), bgcolor="red")
+        page.snack_bar.open = True
+        page.update()
+
+    def seleccionar_reporte_accion(ruta):
+        reporte_seleccionado["ruta"] = ruta
+        
+        btn_enviar_pc.disabled = False
+        btn_exportar_local.disabled = False
+        btn_eliminar_reporte.disabled = False
+        
+        mostrar_contenido_excel(ruta)
+        page.update()
+
+    def enviar_excel_red(ruta_excel, ip_destino):
+        try:
+            nombre_archivo = os.path.basename(ruta_excel)
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(5.0)
+            s.connect((ip_destino, 9102)) 
+            
+            s.send(nombre_archivo.encode('utf-8'))
+            respuesta = s.recv(1024)
+            if respuesta == b"OK":
+                with open(ruta_excel, 'rb') as f:
+                    while True:
+                        bytes_leidos = f.read(4096)
+                        if not bytes_leidos: break
+                        s.sendall(bytes_leidos)
+            s.close()
+            return True, "Reporte enviado exitosamente a la PC."
+        except Exception as e:
+            return False, f"Error de red: {e}"
+
+    def accion_boton_enviar_pc(e):
+        ip = txt_ip_pc.value.strip()
+        if not ip:
+            page.snack_bar = ft.SnackBar(ft.Text("Primero debes guardar la IP de la computadora."), bgcolor="red")
+        else:
+            exito, mensaje = enviar_excel_red(reporte_seleccionado["ruta"], ip)
+            color_bg = "green" if exito else "red"
+            page.snack_bar = ft.SnackBar(ft.Text(mensaje), bgcolor=color_bg)
+        page.snack_bar.open = True
+        page.update()
+
+    def accion_boton_exportar_local(e):
+        try:
+            ruta_origen = reporte_seleccionado["ruta"]
+            nombre_archivo = os.path.basename(ruta_origen)
+            
+            carpeta_descargas = "/storage/emulated/0/Download"
+            if not os.path.exists(carpeta_descargas): 
+                carpeta_descargas = os.path.expanduser("~/Downloads")
+                
+            os.makedirs(carpeta_descargas, exist_ok=True)
+            ruta_destino = os.path.join(carpeta_descargas, nombre_archivo)
+            
+            shutil.copy(ruta_origen, ruta_destino)
+            page.snack_bar = ft.SnackBar(ft.Text(f"Archivo copiado a: {carpeta_descargas}"), bgcolor="green")
+        except Exception as ex:
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error al exportar: {ex}"), bgcolor="red")
+        
+        page.snack_bar.open = True
+        page.update()
+
+    def accion_boton_eliminar_reporte(e):
+        try:
+            os.remove(reporte_seleccionado["ruta"])
+            page.snack_bar = ft.SnackBar(ft.Text("Reporte eliminado permanentemente."), bgcolor="green")
+            ir_a_visor_reportes(None)
+        except Exception as ex:
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error al eliminar: {ex}"), bgcolor="red")
+        page.snack_bar.open = True
+        page.update()
+
+    btn_enviar_pc.on_click = accion_boton_enviar_pc
+    btn_exportar_local.on_click = accion_boton_exportar_local
+    btn_eliminar_reporte.on_click = accion_boton_eliminar_reporte
+
     def mostrar_contenido_excel(ruta):
         datos = rp.leer_excel(ruta)
         contenedor_tabla_excel.controls.clear()
@@ -424,20 +527,38 @@ def main(page: ft.Page):
 
     def ir_a_visor_reportes(e):
         ocultar_todo()
+        btn_enviar_pc.disabled = True
+        btn_exportar_local.disabled = True
+        btn_eliminar_reporte.disabled = True
+        reporte_seleccionado["ruta"] = None
+        
+        # Bypass: Recuperamos la IP desde el archivo de texto
+        ruta_ip = os.path.join(os.path.dirname(db.get_db_path()), "ip_pc_config.txt")
+        if os.path.exists(ruta_ip):
+            with open(ruta_ip, "r") as f:
+                txt_ip_pc.value = f.read().strip()
+        else:
+            txt_ip_pc.value = ""
+        
         col_lista_archivos.controls.clear()
         contenedor_tabla_excel.controls.clear()
-        contenedor_tabla_excel.controls.append(ft.Text("Selecciona un reporte de la lista para visualizarlo.", color="grey"))
+        contenedor_tabla_excel.controls.append(ft.Text("Selecciona un reporte de la lista para gestionarlo.", color="grey", size=18))
+        
         base_path = os.path.dirname(db.get_db_path())
         ruta_reportes = os.path.join(base_path, "Reportes_Cierre")
+        print("LOS REPORTES ESTÁN ESCONDIDOS EN:", ruta_reportes)
         if os.path.exists(ruta_reportes):
             archivos = [f for f in os.listdir(ruta_reportes) if f.endswith('.xlsx')]
             archivos.sort(reverse=True)
             if archivos:
-                for arch in archivos: col_lista_archivos.controls.append(ft.ElevatedButton(arch, on_click=lambda e, r=os.path.join(ruta_reportes, arch): mostrar_contenido_excel(r), width=300))
+                for arch in archivos: 
+                    col_lista_archivos.controls.append(ft.ElevatedButton(arch, on_click=lambda e, r=os.path.join(ruta_reportes, arch): seleccionar_reporte_accion(r), width=300))
             else: col_lista_archivos.controls.append(ft.Text("No hay reportes generados."))
-        else: col_lista_archivos.controls.append(ft.Text("Carpeta no encontrada. Aún no se han hecho cortes."))
+        else: col_lista_archivos.controls.append(ft.Text("Carpeta no encontrada."))
+        
         v_visor_reportes.visible = True
         page.update()
+    # =======================================================
 
     def mostrar_mensaje_central(texto, color_texto):
         grid_prods.controls.clear()
@@ -513,7 +634,6 @@ def main(page: ft.Page):
         txt_nuevo_usr.value = ""; txt_nuevo_pwd.value = ""
         page.update()
 
-    # RESTAURADO: agregar_item ya no ensucia el nombre del producto
     def agregar_item(n, p, d):
         m = estado["mesa"]; found = False
         for it in cuentas[m]:
@@ -534,14 +654,10 @@ def main(page: ft.Page):
                 break
         refrescar_ticket()
 
-    # =======================================================
-    # EL MOTOR DE IMPRESIÓN POR RED (Sockets + ESC/POS)
-    # =======================================================
     def limpiar_texto(texto):
         texto = texto.replace('ñ', 'n').replace('Ñ', 'N')
         return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
 
-    # MODIFICADO: Ahora recibe el parámetro tipo_orden
     def enviar_ticket_red(ip, destino, items, mesa, tipo_orden):
         if not items: return
         
@@ -557,7 +673,6 @@ def main(page: ft.Page):
         ticket += CENTER + BOLD_ON
         ticket += f"=== ORDEN PARA {destino} ===\n".encode('ascii', errors='ignore')
         
-        # Inyección del título dinámico ("PARA LLEVAR" o "COMER AQUI")
         tipo_limpio = limpiar_texto(tipo_orden)
         ticket += f">> {tipo_limpio} <<\n".encode('ascii', errors='ignore')
         
@@ -584,7 +699,6 @@ def main(page: ft.Page):
         except Exception as ex:
             print(f"Error interno al imprimir en {destino} ({ip}): {ex}")
 
-    # MODIFICADO: Evalúa el switch y envía el texto adecuado a las impresoras
     def enviar_comanda(e):
         m_id = estado["mesa"]
         nuevos = [i for i in cuentas[m_id] if not i["enviado"]]
@@ -743,7 +857,7 @@ def main(page: ft.Page):
     v_login = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO ADMIN", size=40, weight="bold"), user_input, pass_input, ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=intentar_login), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
     v_login_bloqueo = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO A CONFIGURACIÓN", size=40, weight="bold"), user_input_bloqueo, pass_input_bloqueo, ft.ElevatedButton("ENTRAR", bgcolor="red", color="white", width=350, height=50, on_click=intentar_login_bloqueo), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
     
-    v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([txt_config_tablet_id, ft.ElevatedButton("GUARDAR ID", on_click=validar_y_guardar_id), ft.ElevatedButton("VER REPORTES", bgcolor="green", color="white", on_click=ir_a_visor_reportes), ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales), ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu), ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]), ft.TextButton("SALIR", on_click=ir_a_mesas)], scroll="auto")], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
+    v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([txt_config_tablet_id, ft.ElevatedButton("GUARDAR ID", on_click=validar_y_guardar_id), ft.ElevatedButton("REPORTES", bgcolor="green", color="white", on_click=ir_a_visor_reportes), ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales), ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu), ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]), ft.TextButton("SALIR", on_click=ir_a_mesas)], scroll="auto")], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
     
     v_gestion_menu = ft.Container(content=ft.Column([
         ft.Row([ft.Text("GESTIONAR PRODUCTOS", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin), txt_mensaje_error_gestion]), 
@@ -752,7 +866,28 @@ def main(page: ft.Page):
     ]), visible=False, expand=True, padding=30, bgcolor="white")
     
     v_credenciales = ft.Container(content=ft.Column([ft.Row([ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Column([txt_nuevo_usr, txt_nuevo_pwd, ft.ElevatedButton("GUARDAR CAMBIOS", on_click=guardar_nuevas_credenciales, bgcolor="green", color="white", width=350, height=50), txt_mensaje_credenciales], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), visible=False, expand=True, padding=30, bgcolor="white")
-    v_visor_reportes = ft.Container(content=ft.Column([ft.Row([ft.Text("HISTORIAL DE CORTES (EXCEL)", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Row([col_lista_archivos, ft.VerticalDivider(), contenedor_tabla_excel], expand=True, vertical_alignment=ft.CrossAxisAlignment.START)]), visible=False, expand=True, padding=30, bgcolor="white")
+    
+    columna_izquierda_reportes = ft.Column([
+        txt_ip_pc, 
+        ft.ElevatedButton("GUARDAR IP PC", on_click=guardar_ip_pc_en_cache),
+        ft.Divider(),
+        ft.Text("Lista de Archivos Locales:", weight="bold", size=18),
+        col_lista_archivos
+    ], width=320, expand=False)
+
+    columna_derecha_reportes = ft.Column([
+        ft.Row([btn_enviar_pc, btn_exportar_local, btn_eliminar_reporte], alignment="center"),
+        ft.Divider(),
+        contenedor_tabla_excel
+    ], expand=True)
+
+    v_visor_reportes = ft.Container(
+        content=ft.Column([
+            ft.Row([ft.Text("ADMINISTRACIÓN DE REPORTES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), 
+            ft.Divider(), 
+            ft.Row([columna_izquierda_reportes, ft.VerticalDivider(), columna_derecha_reportes], expand=True, vertical_alignment=ft.CrossAxisAlignment.START)
+        ]), visible=False, expand=True, padding=30, bgcolor="white"
+    )
     
     v_bloqueo_mesas = ft.Container(content=ft.Column([
         ft.Row([ft.Text("CONFIGURACIÓN DE MESAS", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"), 
