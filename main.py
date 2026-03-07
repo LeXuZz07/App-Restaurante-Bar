@@ -5,6 +5,7 @@ import urllib.request
 import socket
 import unicodedata
 import shutil  # <--- NUEVA LIBRERÍA PARA EXPORTAR
+import threading # <--- NUEVA LIBRERÍA PARA EL SERVIDOR EN SEGUNDO PLANO
 import database as db
 import reports as rp
 
@@ -84,7 +85,16 @@ def main(page: ft.Page):
     pass_input_bloqueo = ft.TextField(label="Contraseña", password=True, width=350)
     
     # -----------------------------------------------
-    # NUEVOS CONTROLES PARA EL PANEL DE REPORTES
+    # NUEVOS CONTROLES PARA EL RECEPTOR DE REPORTES
+    # -----------------------------------------------
+    user_input_receptor = ft.TextField(label="Usuario Admin", width=350)
+    pass_input_receptor = ft.TextField(label="Contraseña", password=True, width=350)
+    estado_servidor = {"activo": False, "socket": None}
+    txt_estado_servidor = ft.Text("ESTADO: APAGADO", color="red", weight="bold", size=22)
+    log_servidor = ft.Column(scroll="always", expand=True)
+
+    # -----------------------------------------------
+    # CONTROLES PARA EL PANEL DE REPORTES
     # -----------------------------------------------
     reporte_seleccionado = {"ruta": None}
     col_lista_archivos = ft.Column(scroll="always", expand=1)
@@ -125,7 +135,7 @@ def main(page: ft.Page):
 
     v_login = v_admin = v_gestion_menu = v_credenciales = v_visor_reportes = v_bloqueo_mesas = v_login_bloqueo = None
     v_mesas = v_pedido = v_confirmacion = v_ticket_final = v_pago_metodo = v_pago_finalizado = v_confirm_cierre = v_resumen_cierre = None
-    v_pago_mixto = None 
+    v_pago_mixto = v_login_receptor = v_modo_receptor = None 
     columna_botones_acciones = None
 
     # =======================================================
@@ -311,6 +321,8 @@ def main(page: ft.Page):
         if v_pedido: v_pedido.visible = False
         if v_login: v_login.visible = False
         if v_login_bloqueo: v_login_bloqueo.visible = False
+        if v_login_receptor: v_login_receptor.visible = False
+        if v_modo_receptor: v_modo_receptor.visible = False
         if v_admin: v_admin.visible = False
         if v_confirmacion: v_confirmacion.visible = False
         if v_ticket_final: v_ticket_final.visible = False
@@ -346,6 +358,7 @@ def main(page: ft.Page):
         ocultar_todo()
         user_input.value = ""; pass_input.value = ""
         user_input_bloqueo.value = ""; pass_input_bloqueo.value = ""
+        user_input_receptor.value = ""; pass_input_receptor.value = ""
         v_mesas.visible = True
         inicializar_salon()
         page.update()
@@ -372,6 +385,106 @@ def main(page: ft.Page):
             page.snack_bar = ft.SnackBar(ft.Text("Usuario o contraseña incorrectos"), bgcolor="red")
             page.snack_bar.open = True
             page.update()
+
+    # =======================================================
+    # LÓGICA DEL RECEPTOR DE REPORTES (SERVIDOR EN SEGUNDO PLANO)
+    # =======================================================
+    def ir_a_login_receptor(e):
+        ocultar_todo()
+        user_input_receptor.value = ""
+        pass_input_receptor.value = ""
+        v_login_receptor.visible = True
+        page.update()
+
+    def intentar_login_receptor(e):
+        usr_bd, pwd_bd = db.db_obtener_credenciales()
+        if user_input_receptor.value == usr_bd and pass_input_receptor.value == pwd_bd:
+            ocultar_todo()
+            v_modo_receptor.visible = True
+            page.update()
+        else:
+            page.snack_bar = ft.SnackBar(ft.Text("Usuario o contraseña incorrectos"), bgcolor="red")
+            page.snack_bar.open = True
+            page.update()
+
+    def servidor_worker():
+        puerto = 9102
+        # CAMBIO: Ahora dirigimos los archivos entrantes directamente a la Bóveda Privada
+        carpeta_destino = os.path.join(os.path.dirname(db.get_db_path()), "Reportes_Cierre")
+        os.makedirs(carpeta_destino, exist_ok=True)
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Evita el error de "Puerto ya en uso" si se apaga y prende rápido
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
+            s.bind(('0.0.0.0', puerto))
+            s.listen(5)
+            estado_servidor["socket"] = s
+
+            txt_estado_servidor.value = f"ESTADO: ESCUCHANDO EN PUERTO {puerto}"
+            txt_estado_servidor.color = "green"
+            log_servidor.controls.append(ft.Text(f"[*] Servidor encendido. Los archivos entrarán a la bóveda interna de la app.", color="blue", italic=True))
+            page.update()
+
+            while estado_servidor["activo"]:
+                s.settimeout(2.0) # Espera 2 segundos la conexión, si no hay, evalúa el while de nuevo
+                try:
+                    conn, addr = s.accept()
+                except socket.timeout:
+                    continue
+                except Exception:
+                    break # El socket fue cerrado desde afuera
+
+                log_servidor.controls.append(ft.Text(f"[+] Conexión entrante detectada desde: {addr[0]}", color="orange"))
+                page.update()
+
+                try:
+                    nombre_archivo = conn.recv(1024).decode('utf-8')
+                    if nombre_archivo:
+                        conn.send(b"OK")
+                        # Guardamos el archivo en la bóveda privada
+                        ruta_guardado = os.path.join(carpeta_destino, nombre_archivo)
+                        with open(ruta_guardado, 'wb') as f:
+                            while True:
+                                bytes_leidos = conn.recv(4096)
+                                if not bytes_leidos: break
+                                f.write(bytes_leidos)
+                        log_servidor.controls.append(ft.Text(f"[✔] EXCEL RECIBIDO Y GUARDADO: {nombre_archivo}", color="green", weight="bold"))
+                        page.update()
+                except Exception as ex:
+                    log_servidor.controls.append(ft.Text(f"[x] Error al recibir el archivo: {ex}", color="red"))
+                    page.update()
+                finally:
+                    conn.close()
+
+        except Exception as e:
+            log_servidor.controls.append(ft.Text(f"Error fatal del servidor: {e}", color="red"))
+            page.update()
+        finally:
+            if estado_servidor["socket"]:
+                try: estado_servidor["socket"].close()
+                except: pass
+            txt_estado_servidor.value = "ESTADO: APAGADO"
+            txt_estado_servidor.color = "red"
+            btn_toggle_servidor.text = "▶ INICIAR RECEPCIÓN"
+            btn_toggle_servidor.bgcolor = "green"
+            page.update()
+
+    def toggle_servidor(e):
+        if not estado_servidor["activo"]:
+            estado_servidor["activo"] = True
+            btn_toggle_servidor.text = "⏹ DETENER RECEPCIÓN"
+            btn_toggle_servidor.bgcolor = "red"
+            page.update()
+            # Encender el hilo (Thread) en segundo plano
+            threading.Thread(target=servidor_worker, daemon=True).start()
+        else:
+            estado_servidor["activo"] = False
+            log_servidor.controls.append(ft.Text("[*] Apagando servidor...", color="red"))
+            page.update()
+
+    btn_toggle_servidor = ft.ElevatedButton("▶ INICIAR RECEPCIÓN", bgcolor="green", color="white", height=60, width=300, on_click=toggle_servidor)
+    # =======================================================
 
     def ir_a_admin(e):
         ocultar_todo()
@@ -421,10 +534,9 @@ def main(page: ft.Page):
         page.update()
 
     # =======================================================
-    # LÓGICA DEL PANEL DE ADMINISTRACIÓN DE REPORTES (BYPASS INCLUIDO)
+    # LÓGICA DEL PANEL DE ADMINISTRACIÓN DE REPORTES
     # =======================================================
     def guardar_ip_pc_en_cache(e):
-        # Bypass: Guardamos la IP en un archivo de texto seguro
         ruta_ip = os.path.join(os.path.dirname(db.get_db_path()), "ip_pc_config.txt")
         try:
             with open(ruta_ip, "w") as f:
@@ -461,14 +573,14 @@ def main(page: ft.Page):
                         if not bytes_leidos: break
                         s.sendall(bytes_leidos)
             s.close()
-            return True, "Reporte enviado exitosamente a la PC."
+            return True, "Reporte enviado exitosamente a la PC/Tablet."
         except Exception as e:
             return False, f"Error de red: {e}"
 
     def accion_boton_enviar_pc(e):
         ip = txt_ip_pc.value.strip()
         if not ip:
-            page.snack_bar = ft.SnackBar(ft.Text("Primero debes guardar la IP de la computadora."), bgcolor="red")
+            page.snack_bar = ft.SnackBar(ft.Text("Primero debes guardar la IP destino."), bgcolor="red")
         else:
             exito, mensaje = enviar_excel_red(reporte_seleccionado["ruta"], ip)
             color_bg = "green" if exito else "red"
@@ -532,7 +644,6 @@ def main(page: ft.Page):
         btn_eliminar_reporte.disabled = True
         reporte_seleccionado["ruta"] = None
         
-        # Bypass: Recuperamos la IP desde el archivo de texto
         ruta_ip = os.path.join(os.path.dirname(db.get_db_path()), "ip_pc_config.txt")
         if os.path.exists(ruta_ip):
             with open(ruta_ip, "r") as f:
@@ -546,7 +657,6 @@ def main(page: ft.Page):
         
         base_path = os.path.dirname(db.get_db_path())
         ruta_reportes = os.path.join(base_path, "Reportes_Cierre")
-        print("LOS REPORTES ESTÁN ESCONDIDOS EN:", ruta_reportes)
         if os.path.exists(ruta_reportes):
             archivos = [f for f in os.listdir(ruta_reportes) if f.endswith('.xlsx')]
             archivos.sort(reverse=True)
@@ -855,8 +965,22 @@ def main(page: ft.Page):
     page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest, dlg_logo])
 
     v_login = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO ADMIN", size=40, weight="bold"), user_input, pass_input, ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=intentar_login), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
+    
     v_login_bloqueo = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO A CONFIGURACIÓN", size=40, weight="bold"), user_input_bloqueo, pass_input_bloqueo, ft.ElevatedButton("ENTRAR", bgcolor="red", color="white", width=350, height=50, on_click=intentar_login_bloqueo), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
     
+    # ------------------ NUEVAS VISTAS DEL RECEPTOR ------------------
+    v_login_receptor = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO AL SERVIDOR", size=40, weight="bold"), user_input_receptor, pass_input_receptor, ft.ElevatedButton("ENTRAR", bgcolor="purple", color="white", width=350, height=50, on_click=intentar_login_receptor), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
+
+    v_modo_receptor = ft.Container(content=ft.Column([
+        ft.Row([ft.Text("MODO RECEPTOR DE REPORTES", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"),
+        ft.Divider(),
+        ft.Row([btn_toggle_servidor, ft.Container(width=20), txt_estado_servidor], alignment="center", vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ft.Divider(),
+        ft.Text("Registro de Actividad (Log):", weight="bold"),
+        ft.Container(content=log_servidor, expand=True, bgcolor="black", padding=15, border_radius=10)
+    ]), visible=False, expand=True, padding=30, bgcolor="white")
+    # ----------------------------------------------------------------
+
     v_admin = ft.Container(content=ft.Column([ft.Row([ft.Text("REPORTE DIARIO", size=30, weight="bold"), ft.Row([txt_config_tablet_id, ft.ElevatedButton("GUARDAR ID", on_click=validar_y_guardar_id), ft.ElevatedButton("REPORTES", bgcolor="green", color="white", on_click=ir_a_visor_reportes), ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales), ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu), ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]), ft.TextButton("SALIR", on_click=ir_a_mesas)], scroll="auto")], alignment="spaceBetween"), ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center")]), visible=False, expand=True, padding=30, bgcolor="white")
     
     v_gestion_menu = ft.Container(content=ft.Column([
@@ -869,7 +993,7 @@ def main(page: ft.Page):
     
     columna_izquierda_reportes = ft.Column([
         txt_ip_pc, 
-        ft.ElevatedButton("GUARDAR IP PC", on_click=guardar_ip_pc_en_cache),
+        ft.ElevatedButton("GUARDAR IP DESTINO", on_click=guardar_ip_pc_en_cache),
         ft.Divider(),
         ft.Text("Lista de Archivos Locales:", weight="bold", size=18),
         col_lista_archivos
@@ -904,7 +1028,8 @@ def main(page: ft.Page):
         grid_bloqueo
     ]), visible=False, expand=True, padding=30, bgcolor="white")
     
-    v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("SALÓN", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
+    # MODIFICACIÓN: Agregué el botón morado de "RECIBIR CORTES" en la vista principal
+    v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("SALÓN", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.ElevatedButton("RECIBIR CORTES", bgcolor="purple", color="white", on_click=ir_a_login_receptor), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
     
     v_pedido = ft.Container(content=ft.Row([ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), row_categorias_menu, grid_prods], expand=3), ft.Container(content=ft.Column([ft.Row([txt_titulo_mesa, switch_llevar], alignment="spaceBetween"), ft.Divider(), col_ticket, ft.Divider(), txt_total, columna_botones_acciones]), expand=2, bgcolor="#F5F5F5", padding=20, border_radius=15)]), expand=True, visible=False, bgcolor="white")
     
@@ -917,10 +1042,11 @@ def main(page: ft.Page):
     v_confirm_cierre = ft.Container(content=ft.Row([ft.Column([ft.Text("¡ADVERTENCIA!", size=30, weight="bold", color="red"), ft.Text("Se resetearán los ingresos y se generará el Excel."), ft.Row([ft.ElevatedButton("SÍ", bgcolor="green", color="white", on_click=ejecutar_cierre_final, width=150), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', False), page.update()], width=150)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="rgba(255,255,255,0.95)")
     v_resumen_cierre = ft.Container(content=ft.Row([ft.Column([ft.Text("RESUMEN CIERRE", size=30, weight="bold"), txt_resumen_cierre_total := ft.Text("", size=30, color="green", weight="bold"), txt_resumen_efectivo := ft.Text(""), txt_resumen_tarjeta := ft.Text(""), txt_resumen_cierre_fecha := ft.Text("", size=18, weight="bold"), ft.ElevatedButton("CERRAR", on_click=ir_a_admin)], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="white")
 
+    # MODIFICACIÓN: Agregué las dos vistas nuevas al final de la lista del Stack
     page.add(ft.Stack([
-        v_mesas, v_pedido, v_login, v_login_bloqueo, v_admin, v_confirmacion, v_ticket_final, 
+        v_mesas, v_pedido, v_login, v_login_bloqueo, v_login_receptor, v_admin, v_confirmacion, v_ticket_final, 
         v_confirm_cierre, v_resumen_cierre, v_pago_metodo, v_pago_mixto, v_pago_finalizado, 
-        v_gestion_menu, v_credenciales, v_visor_reportes, v_bloqueo_mesas
+        v_gestion_menu, v_credenciales, v_visor_reportes, v_bloqueo_mesas, v_modo_receptor
     ], expand=True))
     ir_a_mesas(None)
 
