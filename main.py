@@ -4,8 +4,8 @@ import os
 import urllib.request
 import socket
 import unicodedata
-import shutil  # <--- NUEVA LIBRERÍA PARA EXPORTAR
-import threading # <--- NUEVA LIBRERÍA PARA EL SERVIDOR EN SEGUNDO PLANO
+import shutil  
+import threading 
 import database as db
 import reports as rp
 
@@ -47,7 +47,6 @@ def main(page: ft.Page):
         txt_detalle.value = "Paso 2 de 2"
         page.update()
         cuentas = db.db_cargar_estado_inicial()
-        # MODIFICACIÓN: Agregamos la memoria 'ultimo_ticket'
         estado = {"mesa": 0, "ultimo_ticket": {}}
         mesas_bloqueadas = db.db_obtener_mesas_bloqueadas()
 
@@ -85,18 +84,12 @@ def main(page: ft.Page):
     user_input_bloqueo = ft.TextField(label="Usuario Admin", width=350)
     pass_input_bloqueo = ft.TextField(label="Contraseña", password=True, width=350)
     
-    # -----------------------------------------------
-    # NUEVOS CONTROLES PARA EL RECEPTOR DE REPORTES
-    # -----------------------------------------------
     user_input_receptor = ft.TextField(label="Usuario Admin", width=350)
     pass_input_receptor = ft.TextField(label="Contraseña", password=True, width=350)
     estado_servidor = {"activo": False, "socket": None}
     txt_estado_servidor = ft.Text("ESTADO: APAGADO", color="red", weight="bold", size=22)
     log_servidor = ft.Column(scroll="always", expand=True)
 
-    # -----------------------------------------------
-    # CONTROLES PARA EL PANEL DE REPORTES
-    # -----------------------------------------------
     reporte_seleccionado = {"ruta": None}
     col_lista_archivos = ft.Column(scroll="always", expand=1)
     contenedor_tabla_excel = ft.Column(scroll="always", expand=True)
@@ -105,7 +98,6 @@ def main(page: ft.Page):
     btn_enviar_pc = ft.ElevatedButton("📤 ENVIAR A PC", disabled=True, bgcolor="blue", color="white", height=45)
     btn_exportar_local = ft.ElevatedButton("📥 EXPORTAR LOCAL", disabled=True, bgcolor="green", color="white", height=45)
     btn_eliminar_reporte = ft.ElevatedButton("🗑️ ELIMINAR", disabled=True, bgcolor="red", color="white", height=45)
-    # -----------------------------------------------
 
     grid_mesas = ft.GridView(expand=True, runs_count=5, spacing=15)
     grid_bloqueo = ft.GridView(expand=True, runs_count=5, spacing=15)
@@ -313,6 +305,85 @@ def main(page: ft.Page):
     ], spacing=2)
 
     actualizar_botones_categorias_menu()
+
+    # =======================================================
+    # 1.7 LÓGICA DE NOTAS PARA PRODUCTOS (EL TRUCO NINJA)
+    # =======================================================
+    txt_nota_producto = ft.TextField(label="Instrucciones especiales (Opcional)", width=350, multiline=True)
+    producto_temp = {}
+
+    def abrir_dialogo_nota(n, p, d):
+        producto_temp["n"] = n
+        producto_temp["p"] = p
+        producto_temp["d"] = d
+        txt_nota_producto.value = ""
+        dlg_nota.title = ft.Text(f"Añadiendo: {n}")
+        dlg_nota.open = True
+        page.update()
+
+    def cerrar_dialogo_nota(e):
+        dlg_nota.open = False
+        page.update()
+
+    def confirmar_nota_y_agregar(e):
+        nota = txt_nota_producto.value.strip()
+        n = producto_temp["n"]
+        p = producto_temp["p"]
+        d = producto_temp["d"]
+        
+        # Si el usuario escribió una nota, la fusionamos con el nombre
+        nombre_final = f"{n} *{nota}*" if nota else n
+        
+        agregar_item(nombre_final, p, d)
+        dlg_nota.open = False
+        page.update()
+
+    dlg_nota = ft.AlertDialog(
+        title=ft.Text("Añadir a la orden"),
+        content=txt_nota_producto,
+        actions=[
+            ft.ElevatedButton("AGREGAR", bgcolor="blue", color="white", on_click=confirmar_nota_y_agregar),
+            ft.TextButton("Cancelar", on_click=cerrar_dialogo_nota)
+        ]
+    )
+    # =======================================================
+    # 1.8 DIÁLOGO DE SELECCIÓN DE IMPRESORA
+    # =======================================================
+    def enviar_a_impresora(destino):
+        if destino == "BARRA":
+            ip, _ = db.db_obtener_ips()
+        else:
+            _, ip = db.db_obtener_ips()
+
+        ticket_bytes = estado.get("ticket_bytes", b'')
+        if not ticket_bytes:
+            page.snack_bar = ft.SnackBar(ft.Text("Error: No hay ticket para imprimir."), bgcolor="red")
+            page.snack_bar.open = True; page.update(); return
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2.0)
+            s.connect((ip, 9100))
+            s.sendall(ticket_bytes)
+            s.close()
+            page.snack_bar = ft.SnackBar(ft.Text(f"¡Ticket enviado a {destino}!"), bgcolor="green")
+        except Exception as ex:
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error al conectar con {destino} ({ip}): {ex}"), bgcolor="red")
+
+        dlg_impresora.open = False
+        page.snack_bar.open = True
+        page.update()
+
+    dlg_impresora = ft.AlertDialog(
+        title=ft.Text("¿Dónde deseas imprimir?"),
+        content=ft.Text("Selecciona la impresora destino para este ticket:"),
+        actions=[
+            ft.ElevatedButton("BARRA", bgcolor="blue", color="white", on_click=lambda _: enviar_a_impresora("BARRA")),
+            ft.ElevatedButton("COCINA", bgcolor="orange", color="white", on_click=lambda _: enviar_a_impresora("COCINA")),
+            ft.TextButton("Cancelar", on_click=lambda _: [setattr(dlg_impresora, 'open', False), page.update()])
+        ],
+        actions_alignment=ft.MainAxisAlignment.CENTER
+    )
 
     # ==========================================
     # 2. DEFINICIÓN DE FUNCIONES
@@ -846,7 +917,10 @@ def main(page: ft.Page):
         # GUARDAMOS LOS DATOS EN LA MEMORIA ANTES DE BORRAR LA MESA
         estado["ultimo_ticket"] = {"mesa": m_id, "items": items.copy(), "total": total, "metodo": metodo}
         
-        db.db_registrar_venta_final(m_id, "\n".join([f"• {i['q']}x {i['n']}" for i in items]), total, metodo)
+        # MODIFICACIÓN: Ahora construimos el detalle con el formato exacto del ticket (incluyendo precio)
+        detalle_ticket = "\n".join([f"{i['q']}x {i['n']}\n  -> ${i['p']*i['q']:.2f}" for i in items])
+        
+        db.db_registrar_venta_final(m_id, detalle_ticket, total, metodo)
         db.db_limpiar_mesa(m_id); cuentas[m_id] = []
         ocultar_todo(); txt_mensaje_despedida.value = f"¡PAGO REGISTRADO!\nMétodo: {metodo.upper()}"; v_pago_finalizado.visible = True; page.update()
 
@@ -885,13 +959,16 @@ def main(page: ft.Page):
             # GUARDAMOS LOS DATOS EN LA MEMORIA ANTES DE BORRAR LA MESA
             estado["ultimo_ticket"] = {"mesa": m_id, "items": cuentas[m_id].copy(), "total": total, "metodo": f"MIXTO (Efe: ${efe} | Tar: ${tar})"}
             
-            db.db_registrar_venta_final(m_id, "\n".join([f"• {i['q']}x {i['n']}" for i in cuentas[m_id]]), total, metodo_string)
+            # MODIFICACIÓN: Construimos el detalle también aquí
+            detalle_ticket = "\n".join([f"{i['q']}x {i['n']}\n  -> ${i['p']*i['q']:.2f}" for i in cuentas[m_id]])
+            
+            db.db_registrar_venta_final(m_id, detalle_ticket, total, metodo_string)
             db.db_limpiar_mesa(m_id); cuentas[m_id] = []
             ocultar_todo()
             txt_mensaje_despedida.value = f"¡PAGO REGISTRADO!\nMixto (Efe: ${efe} | Tar: ${tar})"
             v_pago_finalizado.visible = True; page.update()
         except Exception:
-            txt_mixto_error.value = "⚠️ Error en los datos ingresados"; page.update()
+            txt_mixto_error.value = "Error en los datos ingresados"; page.update()
 
     # =======================================================
     # NUEVA FUNCIÓN PARA IMPRIMIR TICKET FINAL
@@ -906,7 +983,6 @@ def main(page: ft.Page):
         total = ticket_data["total"]
         metodo = ticket_data["metodo"]
         
-        # Comandos ESC/POS extraídos del manual
         ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== TICKET DE VENTA ===\nRESTAURANTE BAR\n" + b'\x1B\x45\x00' 
         ticket += f"MESA: {mesa}\nFECHA: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n".encode('ascii', errors='ignore') 
         ticket += b'\x1B\x61\x00' + ("-" * 32 + "\n").encode('ascii', errors='ignore')
@@ -919,15 +995,29 @@ def main(page: ft.Page):
         ticket += b'\x1B\x61\x02' + b'\x1B\x45\x01' + f"TOTAL: ${total:.2f}\nPAGO: {metodo}\n".encode('ascii', errors='ignore') 
         ticket += b'\x1B\x45\x00' + b'\x1B\x61\x01' + b"*** GRACIAS POR SU VISITA ***\n" + b'\x0A' * 4 + b'\x1D\x56\x00'
         
-        ip_b, _ = db.db_obtener_ips()
+        # NUEVO: Guardamos el ticket y abrimos el diálogo para elegir impresora
+        estado["ticket_bytes"] = ticket
+        dlg_impresora.open = True
+        page.update()
+    # =======================================================
+
+    def accion_reimprimir_ticket(mesa, detalle, total, fecha, metodo):
+        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== COPIA DE TICKET ===\nRESTAURANTE BAR\n" + b'\x1B\x45\x00' 
+        ticket += f"MESA: {mesa}\nFECHA: {fecha}\n".encode('ascii', errors='ignore') 
+        ticket += b'\x1B\x61\x00' + ("-" * 32 + "\n").encode('ascii', errors='ignore')
         
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(2.0); s.connect((ip_b, 9100)); s.sendall(ticket); s.close()
-            page.snack_bar = ft.SnackBar(ft.Text("¡Ticket final enviado a la caja!"), bgcolor="green")
-        except Exception as ex: 
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error de impresora: {ex}"), bgcolor="red")
+        # El detalle de la base de datos ya viene con saltos de línea
+        detalle_limpio = limpiar_texto(detalle)
+        ticket += f"{detalle_limpio}\n".encode('ascii', errors='ignore')
             
-        page.snack_bar.open = True; page.update()
+        ticket += ("-" * 32 + "\n").encode('ascii', errors='ignore') 
+        ticket += b'\x1B\x61\x02' + b'\x1B\x45\x01' + f"TOTAL: ${total:.2f}\nPAGO: {metodo}\n".encode('ascii', errors='ignore') 
+        ticket += b'\x1B\x45\x00' + b'\x1B\x61\x01' + b"*** COPIA ***\n" + b'\x0A' * 4 + b'\x1D\x56\x00'
+        
+        # Guardamos en la misma memoria y abrimos el mismo diálogo
+        estado["ticket_bytes"] = ticket
+        dlg_impresora.open = True
+        page.update()
     # =======================================================
 
     def ejecutar_cierre_final(e):
@@ -964,7 +1054,23 @@ def main(page: ft.Page):
                 partes = metodo.split(":")
                 texto_metodo = f"MIXTO (E:${partes[1]} | T:${partes[2]})"
             else: texto_metodo = f"PAGO: {metodo.upper()}"
-            col_reportes_dia.controls.append(ft.Container(content=ft.Column([ft.Row([ft.Text(f"MESA {v[0]}", weight="bold", size=18), ft.Text(texto_metodo, color="blue", weight="bold")], alignment="spaceBetween"), ft.Text("Productos:", weight="bold"), ft.Text(v[1], italic=True, color="grey"), ft.Row([ft.Text(f"Total: ${v[2]}", color="green", weight="bold"), ft.Text(f"Hora: {v[3]}", size=12)], alignment="spaceBetween")]), padding=15, border=ft.border.all(1, "grey"), border_radius=10, margin=ft.margin.only(bottom=10)))
+            
+            # NUEVO: Botón de reimprimir pasando los datos específicos de esta venta
+            btn_reimprimir = ft.ElevatedButton("🖨️ REIMPRIMIR", bgcolor="grey", color="white", on_click=lambda e, m=v[0], d=v[1], t=v[2], f=v[3], met=texto_metodo: accion_reimprimir_ticket(m, d, t, f, met))
+
+            col_reportes_dia.controls.append(
+                ft.Container(
+                    content=ft.Column([
+                        ft.Row([ft.Text(f"MESA {v[0]}", weight="bold", size=18), ft.Text(texto_metodo, color="blue", weight="bold")], alignment="spaceBetween"), 
+                        ft.Text("Productos:", weight="bold"), 
+                        ft.Text(v[1], italic=True, color="grey"), 
+                        ft.Row([ft.Text(f"Total: ${v[2]}", color="green", weight="bold"), ft.Text(f"Hora: {v[3]}", size=12)], alignment="spaceBetween"),
+                        ft.Divider(),
+                        ft.Row([btn_reimprimir], alignment="end") # Se añade el botón alineado a la derecha
+                    ]), 
+                    padding=15, border=ft.border.all(1, "grey"), border_radius=10, margin=ft.margin.only(bottom=10)
+                )
+            )
         txt_ingreso_total_dia.value = f"TOTAL EN CAJA: ${sum(x[2] for x in ventas)}"; page.update()
 
     def refrescar_lista_gestion():
@@ -974,12 +1080,15 @@ def main(page: ft.Page):
             col_lista_prods.controls.append(ft.Row([ft.Text(f"{p[1]} ({p[3]})", expand=True), tf, ft.TextButton("ACTUALIZAR", on_click=lambda e, idx=p[0], campo=tf: intentar_actualizar_precio(idx, campo.value)), ft.TextButton("BORRAR", on_click=lambda e, idx=p[0]: [db.db_eliminar_producto(idx), refrescar_lista_gestion()], style=ft.ButtonStyle(color="red"))]))
         page.update()
 
+    # =======================================================
+    # MODIFICACIÓN AQUÍ PARA ABRIR LA NOTA EN VEZ DE AÑADIR DIRECTO
+    # =======================================================
     def filtrar_menu_dinamico(cat):
         grid_prods.controls.clear()
         grid = ft.GridView(runs_count=3, spacing=10, max_extent=150, expand=True) 
         
         for p in [x for x in db.db_obtener_productos() if x[3] == cat]:
-            grid.controls.append(ft.ElevatedButton(content=ft.Text(f"{p[1]}\n${p[2]}", text_align="center"), on_click=lambda e, n=p[1], pr=p[2], d=p[4]: agregar_item(n, pr, d), height=80))
+            grid.controls.append(ft.ElevatedButton(content=ft.Text(f"{p[1]}\n${p[2]}", text_align="center"), on_click=lambda e, n=p[1], pr=p[2], d=p[4]: abrir_dialogo_nota(n, pr, d), height=80))
         
         grid_prods.controls.append(grid)
         page.update()
@@ -1011,7 +1120,8 @@ def main(page: ft.Page):
 
     columna_botones_acciones = ft.Column([ft.ElevatedButton("COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400), ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=validar_pago_antes_de_confirmar, width=400)])
     
-    page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest, dlg_logo])
+    # MODIFICACIÓN: Añadimos 'dlg_nota' al array de overlays
+    page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest, dlg_logo, dlg_nota, dlg_impresora])
 
     v_login = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO ADMIN", size=40, weight="bold"), user_input, pass_input, ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=intentar_login), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
     
