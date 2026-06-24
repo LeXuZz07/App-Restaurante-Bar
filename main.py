@@ -8,6 +8,7 @@ import shutil
 import threading 
 import database as db
 import reports as rp
+#import openpyxl
 
 def main(page: ft.Page):
     # ==========================================
@@ -426,7 +427,7 @@ def main(page: ft.Page):
                 
             contenido_mesa = [ft.Text(f"{i}", color="white", weight="bold", size=22)]
             if logo_path and os.path.exists(logo_path):
-                contenido_mesa.append(ft.Image(src=logo_path, width=70, height=70, fit="contain"))
+                contenido_mesa.append(ft.Image(src=logo_path, width=150, height=150, fit="contain"))
                 
             grid_mesas.controls.append(ft.Container(content=ft.Column(contenido_mesa, alignment="center", horizontal_alignment="center"), bgcolor=color_fondo, border_radius=10, padding=10, on_click=ir_a_pedido, data=i))
 
@@ -1045,7 +1046,7 @@ def main(page: ft.Page):
         
         items = ticket_data["items"]; mesa = ticket_data["mesa"]; total = ticket_data["total"]; metodo = ticket_data["metodo"]
         
-        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== TICKET DE VENTA ===\nRESTAURANTE BAR\n" + b'\x1B\x45\x00' 
+        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== TICKET DE VENTA ===\nHOTEL HACIENDA REAL\n" + b'\x1B\x45\x00' 
         ticket += f"MESA: {mesa}\nFECHA: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n".encode('ascii', errors='ignore') 
         ticket += b'\x1B\x61\x00' + ("-" * 32 + "\n").encode('ascii', errors='ignore')
         
@@ -1062,7 +1063,7 @@ def main(page: ft.Page):
         page.update()
 
     def accion_reimprimir_ticket(mesa, detalle, total, fecha, metodo):
-        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== COPIA DE TICKET ===\nRESTAURANTE BAR\n" + b'\x1B\x45\x00' 
+        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== COPIA DE TICKET ===\nHOTEL HACIENDA REAL\n" + b'\x1B\x45\x00' 
         ticket += f"MESA: {mesa}\nFECHA: {fecha}\n".encode('ascii', errors='ignore') 
         ticket += b'\x1B\x61\x00' + ("-" * 32 + "\n").encode('ascii', errors='ignore')
         
@@ -1080,18 +1081,36 @@ def main(page: ft.Page):
     def ejecutar_cierre_final(e):
         try:
             ventas = db.db_obtener_ventas_activas()
-            total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0; ventas_limpias = []
+            total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0
+            
+            # --- NUEVO: Cálculo de productos vendidos para la gráfica ---
+            productos_vendidos = {}
+            # -----------------------------------------------------------
+            
             for v in ventas:
                 metodo = v[4]
-                if metodo.lower() == "efectivo": efe += v[2]; ventas_limpias.append(v)
-                elif metodo.lower() == "tarjeta": tar += v[2]; ventas_limpias.append(v)
+                # Suma de montos
+                if metodo.lower() == "efectivo": efe += v[2]
+                elif metodo.lower() == "tarjeta": tar += v[2]
                 elif metodo.startswith("Mixto:"):
                     partes = metodo.split(":")
                     efe += float(partes[1]); tar += float(partes[2])
-                    ventas_limpias.append((v[0], v[1], v[2], v[3], "Mixto"))
-                else: ventas_limpias.append(v)
+                
+                # --- NUEVO: Procesar cada venta para llenar el diccionario ---
+                lineas = v[1].split('\n')
+                for linea in lineas:
+                    if "x " in linea and not linea.startswith("  ->"):
+                        try:
+                            partes = linea.split("x ", 1)
+                            q = int(partes[0].strip())
+                            nombre = partes[1].split("*")[0].strip()
+                            productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + q
+                        except: pass
+                # -----------------------------------------------------------
 
-            rp.generar_excel_cierre(ventas_limpias, total_caja, efe, tar, db.db_obtener_tablet_id())
+            # --- LLAMADA ACTUALIZADA ---
+            rp.generar_excel_cierre(ventas, total_caja, efe, tar, db.db_obtener_tablet_id(), productos_vendidos)
+            
             db.db_ejecutar_cierre_caja()
             v_confirm_cierre.visible = False
             txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
@@ -1214,7 +1233,7 @@ def main(page: ft.Page):
     
     v_bloqueo_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("CONFIGURACIÓN DE MESAS", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"), ft.Row([txt_config_num_mesas, txt_ip_barra, txt_ip_cocina, ft.ElevatedButton("GUARDAR AJUSTES", bgcolor="blue", color="white", on_click=guardar_ajustes_salon), ft.ElevatedButton("CAMBIAR LOGO", bgcolor="purple", color="white", on_click=lambda _: [setattr(txt_logo_url, 'value', ''), setattr(txt_estado_descarga, 'value', ''), setattr(dlg_logo, 'open', True), page.update()]), ft.ElevatedButton("BORRAR LOGO", bgcolor="red", color="white", on_click=borrar_logo)], scroll="auto"), ft.Text("Toca una mesa para cambiar su estado. Verde = Libre | Rojo = Bloqueada", color="grey"), ft.Divider(), grid_bloqueo]), visible=False, expand=True, padding=30, bgcolor="white")
     
-    v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("Restaurante Bar", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.ElevatedButton("RECIBIR CORTES", bgcolor="purple", color="white", on_click=ir_a_login_receptor), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
+    v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("Sistema de Restaurante", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.ElevatedButton("RECIBIR CORTES", bgcolor="purple", color="white", on_click=ir_a_login_receptor), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
     
     v_pedido = ft.Container(content=ft.Row([ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), row_categorias_menu, grid_prods], expand=3), ft.Container(content=ft.Column([ft.Row([txt_titulo_mesa, switch_llevar], alignment="spaceBetween"), ft.Divider(), col_ticket, ft.Divider(), txt_total, columna_botones_acciones]), expand=2, bgcolor="#F5F5F5", padding=20, border_radius=15)]), expand=True, visible=False, bgcolor="white")
     
