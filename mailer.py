@@ -37,11 +37,8 @@ def enviar_reporte_cierre(ruta_excel_adjunto):
     msg['Subject'] = f"Corte de Caja - {fecha_hoy} - POS Hacienda Real"
     
     cuerpo = (
-        "Hola,\n\n"
-        "Se ha generado un nuevo corte de caja automáticamente desde el sistema POS.\n"
-        "Se adjunta el archivo Excel con el detalle de las ventas y las estadísticas.\n\n"
-        "Saludos,\n"
-        "Sistema POS"
+        "Reporte cierre de caja,\n\n"
+        "Se adjuntan los archivos con el detalle de las ventas y las estadísticas.\n\n"
     )
     msg.attach(MIMEText(cuerpo, 'plain'))
     
