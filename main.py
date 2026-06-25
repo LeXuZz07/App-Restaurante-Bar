@@ -8,6 +8,7 @@ import shutil
 import threading 
 import database as db
 import reports as rp
+import mailer
 #import openpyxl
 
 def main(page: ft.Page):
@@ -1083,20 +1084,15 @@ def main(page: ft.Page):
             ventas = db.db_obtener_ventas_activas()
             total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0
             
-            # --- NUEVO: Cálculo de productos vendidos para la gráfica ---
             productos_vendidos = {}
-            # -----------------------------------------------------------
-            
             for v in ventas:
                 metodo = v[4]
-                # Suma de montos
                 if metodo.lower() == "efectivo": efe += v[2]
                 elif metodo.lower() == "tarjeta": tar += v[2]
                 elif metodo.startswith("Mixto:"):
                     partes = metodo.split(":")
                     efe += float(partes[1]); tar += float(partes[2])
                 
-                # --- NUEVO: Procesar cada venta para llenar el diccionario ---
                 lineas = v[1].split('\n')
                 for linea in lineas:
                     if "x " in linea and not linea.startswith("  ->"):
@@ -1106,21 +1102,35 @@ def main(page: ft.Page):
                             nombre = partes[1].split("*")[0].strip()
                             productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + q
                         except: pass
-                # -----------------------------------------------------------
 
-            # --- LLAMADA ACTUALIZADA ---
-            rp.generar_excel_cierre(ventas, total_caja, efe, tar, db.db_obtener_tablet_id(), productos_vendidos)
+            # 1. GENERAR EL EXCEL (Guardamos la ruta en una variable)
+            ruta_excel = rp.generar_excel_cierre(ventas, total_caja, efe, tar, db.db_obtener_tablet_id(), productos_vendidos)
             
+            # 2. ENVIAR POR CORREO AUTOMÁTICAMENTE
+            exito, mensaje = mailer.enviar_reporte_cierre(ruta_excel)
+            if not exito:
+                # Si falla el correo, avisamos pero no detenemos el proceso
+                page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al enviar correo: {mensaje}"), bgcolor="red")
+                page.snack_bar.open = True
+            else:
+                page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado al correo correctamente."), bgcolor="green")
+                page.snack_bar.open = True
+            
+            # 3. FINALIZAR PROCESO DE CIERRE
             db.db_ejecutar_cierre_caja()
             v_confirm_cierre.visible = False
             txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
             txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"
             txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
             txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"
-            v_resumen_cierre.visible = True; page.update()
+            v_resumen_cierre.visible = True
+            page.update()
+            
         except Exception as ex:
             v_confirm_cierre.visible = False
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error al generar reporte: {str(ex)}"), bgcolor="red"); page.snack_bar.open = True; page.update()
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error al generar/enviar reporte: {str(ex)}"), bgcolor="red")
+            page.snack_bar.open = True
+            page.update()
 
     def actualizar_reporte_admin():
         ventas = db.db_obtener_ventas_activas(); col_reportes_dia.controls.clear()
