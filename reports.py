@@ -5,6 +5,9 @@ from openpyxl.chart import BarChart, Reference
 from datetime import datetime
 import os
 import database as db
+import matplotlib
+matplotlib.use('Agg') # Esto evita errores de interfaz gráfica en segundo plano
+import matplotlib.pyplot as plt
 
 def generar_excel_cierre(ventas, total, efectivo, tarjeta, tablet_id, productos_vendidos):
     ruta_db = db.get_db_path()
@@ -83,3 +86,29 @@ def leer_excel(ruta_completa):
         return filas
     except Exception as e:
         return None
+    
+def generar_graficas_imagenes(total_efe, total_tar, productos_vendidos, ruta_base):
+    # 1. Gráfica de ingresos
+    plt.figure(figsize=(6, 4))
+    plt.bar(["Efectivo", "Tarjeta"], [total_efe, total_tar], color=['#28a745', '#007bff'])
+    plt.title("Ingresos por Método")
+    plt.ylabel("Monto ($)")
+    ruta_ingresos = os.path.join(ruta_base, "grafica_ingresos.png")
+    plt.savefig(ruta_ingresos)
+    plt.close()
+    
+    # 2. Gráfica de productos (si hay ventas)
+    ruta_productos = None
+    if productos_vendidos:
+        plt.figure(figsize=(7, 5))
+        nombres = list(productos_vendidos.keys())
+        cantidades = list(productos_vendidos.values())
+        plt.bar(nombres, cantidades, color='#fd7e14')
+        plt.title("Productos más vendidos")
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        ruta_productos = os.path.join(ruta_base, "grafica_productos.png")
+        plt.savefig(ruta_productos)
+        plt.close()
+        
+    return ruta_ingresos, ruta_productos

@@ -45,17 +45,18 @@ def enviar_reporte_cierre(ruta_excel_adjunto):
     )
     msg.attach(MIMEText(cuerpo, 'plain'))
     
-    # Adjuntar archivo
-    if not os.path.exists(ruta_excel_adjunto):
-        return False, f"El archivo no existe: {ruta_excel_adjunto}"
-
-    try:
-        with open(ruta_excel_adjunto, "rb") as f:
-            part = MIMEApplication(f.read(), _subtype="xlsx")
-            part.add_header('Content-Disposition', 'attachment', filename=os.path.basename(ruta_excel_adjunto))
-            msg.attach(part)
-    except Exception as e:
-        return False, f"Error al adjuntar: {e}"
+    # --- ADJUNTAR ARCHIVOS (Cambiado a bucle para manejar lista) ---
+    for ruta_archivo in ruta_excel_adjunto: # Ahora espera una lista
+        if not os.path.exists(ruta_archivo):
+            return False, f"El archivo no existe: {ruta_archivo}"
+            
+        try:
+            with open(ruta_archivo, "rb") as f:
+                part = MIMEApplication(f.read(), _subtype="octet-stream")
+                part.add_header('Content-Disposition', 'attachment', filename=os.path.basename(ruta_archivo))
+                msg.attach(part)
+        except Exception as e:
+            return False, f"Error al adjuntar {ruta_archivo}: {e}"
 
     # Envío SMTP
     try:

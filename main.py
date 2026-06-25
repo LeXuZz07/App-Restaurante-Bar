@@ -1103,20 +1103,29 @@ def main(page: ft.Page):
                             productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + q
                         except: pass
 
-            # 1. GENERAR EL EXCEL (Guardamos la ruta en una variable)
+            # 1. GENERAR EL EXCEL
             ruta_excel = rp.generar_excel_cierre(ventas, total_caja, efe, tar, db.db_obtener_tablet_id(), productos_vendidos)
             
-            # 2. ENVIAR POR CORREO AUTOMÁTICAMENTE
-            exito, mensaje = mailer.enviar_reporte_cierre(ruta_excel)
+            # 2. GENERAR LAS GRÁFICAS COMO IMAGEN
+            base_path = os.path.dirname(ruta_excel)
+            img1, img2 = rp.generar_graficas_imagenes(efe, tar, productos_vendidos, base_path)
+            
+            # 3. PREPARAR LISTA DE ADJUNTOS (Excel + Imágenes)
+            lista_adjuntos = [ruta_excel, img1]
+            if img2:
+                lista_adjuntos.append(img2)
+            
+            # 4. ENVIAR POR CORREO AUTOMÁTICAMENTE (Enviando la lista)
+            exito, mensaje = mailer.enviar_reporte_cierre(lista_adjuntos)
+            
             if not exito:
-                # Si falla el correo, avisamos pero no detenemos el proceso
                 page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al enviar correo: {mensaje}"), bgcolor="red")
                 page.snack_bar.open = True
             else:
-                page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado al correo correctamente."), bgcolor="green")
+                page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado al correo con gráficas."), bgcolor="green")
                 page.snack_bar.open = True
             
-            # 3. FINALIZAR PROCESO DE CIERRE
+            # 5. FINALIZAR PROCESO DE CIERRE
             db.db_ejecutar_cierre_caja()
             v_confirm_cierre.visible = False
             txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
