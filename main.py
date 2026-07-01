@@ -9,6 +9,7 @@ import threading
 import database as db
 import reports as rp
 import mailer
+import json
 #import openpyxl
 
 def main(page: ft.Page):
@@ -66,6 +67,55 @@ def main(page: ft.Page):
         return
 
     page.clean()
+
+    # Variables para el diálogo de configuración de correo
+    txt_conf_email = ft.TextField(label="Correo Electrónico (Gmail)", width=350)
+    txt_conf_pass = ft.TextField(label="Contraseña de Aplicación", password=True, width=350)
+
+    def guardar_config_correo(e):
+        config_data = {
+            "EMAIL_REMITENTE": txt_conf_email.value.strip(),
+            "EMAIL_PASSWORD": txt_conf_pass.value.strip().replace(" ", ""),
+            "EMAIL_DESTINATARIO": txt_conf_email.value.strip() # Enviarse a sí mismo
+        }
+        
+        # Guardamos en la carpeta raíz (donde está main.py)
+        ruta_config = os.path.join(os.path.dirname(__file__), "config.json")
+        
+        try:
+            with open(ruta_config, "w") as f:
+                json.dump(config_data, f)
+            dlg_config_correo.open = False
+            page.snack_bar = ft.SnackBar(ft.Text("¡Configuración guardada exitosamente!"), bgcolor="green")
+            page.snack_bar.open = True
+            page.update()
+        except Exception as ex:
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error al guardar: {ex}"), bgcolor="red")
+            page.snack_bar.open = True
+            page.update()
+
+    dlg_config_correo = ft.AlertDialog(
+        title=ft.Text("Configurar Envío de Reportes"),
+        content=ft.Column([
+            ft.Text("Ingresa los datos de la cuenta de Gmail del sistema:"),
+            txt_conf_email,
+            txt_conf_pass
+        ], tight=True),
+        actions=[
+            ft.ElevatedButton("GUARDAR", bgcolor="blue", color="white", on_click=guardar_config_correo),
+            ft.TextButton("Cancelar", on_click=lambda _: [setattr(dlg_config_correo, 'open', False), page.update()])
+        ]
+    )
+
+    dlg_alerta_config = ft.AlertDialog(
+        title=ft.Text("⚠️ Configuración Necesaria"),
+        content=ft.Text("No se ha configurado una cuenta de correo para los reportes.\n\nPor favor, ve al panel de Administración y presiona 'CONFIG. CORREO' para configurar tu cuenta de Gmail."),
+        actions=[
+            ft.ElevatedButton("ENTENDIDO", on_click=lambda _: [setattr(dlg_alerta_config, 'open', False), page.update()])
+        ]
+    )
+    # No olvides agregarlo a page.overlay
+    page.overlay.append(dlg_alerta_config)
 
     # ==========================================
     # 1. DECLARACIÓN DE VARIABLES Y CONTROLES
@@ -1080,6 +1130,14 @@ def main(page: ft.Page):
         page.update()
 
     def ejecutar_cierre_final(e):
+        # Verificamos si existe la configuración antes de hacer nada.
+        config = mailer.cargar_configuracion()
+        if not config:
+            # Si no hay config, abrimos el diálogo y salimos inmediatamente de la función.
+            dlg_alerta_config.open = True
+            page.update()
+            return  # El 'return' detiene la ejecución aquí mismo. Nada más ocurre.
+        # ------------------------------------------
         try:
             ventas = db.db_obtener_ventas_activas()
             total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0
@@ -1115,15 +1173,23 @@ def main(page: ft.Page):
             if img2:
                 lista_adjuntos.append(img2)
             
-            # 4. ENVIAR POR CORREO AUTOMÁTICAMENTE (Enviando la lista)
+            # 4. ENVIAR POR CORREO
             exito, mensaje = mailer.enviar_reporte_cierre(lista_adjuntos)
             
             if not exito:
-                page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al enviar correo: {mensaje}"), bgcolor="red")
-                page.snack_bar.open = True
+                # Si el error es específicamente de configuración
+                if "Error de configuración" in mensaje:
+                    dlg_alerta_config.open = True
+                    page.update()
+                else:
+                    # Si es otro error (ej. falta internet), mostramos el snackbar rojo
+                    page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error: {mensaje}"), bgcolor="red")
+                    page.snack_bar.open = True
+                    page.update()
             else:
                 page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado al correo con gráficas."), bgcolor="green")
                 page.snack_bar.open = True
+                page.update()
             
             # 5. FINALIZAR PROCESO DE CIERRE
             db.db_ejecutar_cierre_caja()
@@ -1197,7 +1263,7 @@ def main(page: ft.Page):
 
     columna_botones_acciones = ft.Column([ft.ElevatedButton("COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400), ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=validar_pago_antes_de_confirmar, width=400)])
     
-    page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest, dlg_logo, dlg_nota, dlg_impresora])
+    page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest, dlg_logo, dlg_nota, dlg_impresora, dlg_config_correo])
 
     v_login = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO ADMIN", size=40, weight="bold"), user_input, pass_input, ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=intentar_login), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
     
@@ -1219,6 +1285,8 @@ def main(page: ft.Page):
                             ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales),
                             ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu),
                             ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]),
+                            # En la lista de botones dentro de v_admin:
+                            ft.ElevatedButton("CONFIG. CORREO", bgcolor="orange", color="white", on_click=lambda _: [setattr(dlg_config_correo, 'open', True), page.update()]),
                             ft.TextButton("SALIR", on_click=ir_a_mesas),
                         ],
                         wrap=True, alignment=ft.MainAxisAlignment.END, spacing=10,
