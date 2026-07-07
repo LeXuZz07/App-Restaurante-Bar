@@ -118,16 +118,21 @@ def main(page: ft.Page):
     page.overlay.append(dlg_alerta_config)
 
     # Diálogo de espera (bloqueante)
-    dlg_cargando = ft.AlertDialog(
-        modal=True, # Esto es lo que bloquea todo el resto de la App
-        title=ft.Text("Procesando cierre", text_align="center"),
-        content=ft.Column([
-            ft.ProgressRing(),
-            ft.Text("Enviando reportes... por favor espera.", text_align="center")
-        ], tight=True, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
-    )
-    # Lo agregamos al overlay para que sea global
-    page.overlay.append(dlg_cargando)
+    # 1. Declaramos los controles internos por separado
+    #txt_estado_carga = ft.Text("Enviando reportes... por favor espera.", text_align="center")
+    #anillo_carga = ft.ProgressRing()
+
+    # 2. Creamos el diálogo usando esas variables
+    #dlg_cargando = ft.AlertDialog(
+   #    modal=True, 
+   #    title=ft.Text("Procesando cierre", text_align="center"),
+   #    content=ft.Column([
+   #        anillo_carga,
+   #        txt_estado_carga
+   #    ], tight=True, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+   #)
+    # Lo agregamos al overlay tal como lo tenías
+   #page.overlay.append(dlg_cargando)
 
     # ==========================================
     # 1. DECLARACIÓN DE VARIABLES Y CONTROLES
@@ -1145,31 +1150,34 @@ def main(page: ft.Page):
         if not v_confirm_cierre.visible: return
         if hasattr(ejecutar_cierre_final, "en_proceso") and ejecutar_cierre_final.en_proceso: return
         
-        # Ocultamos la advertencia Y mostramos el diálogo de carga bloqueante
+        # 1. Ocultamos la advertencia y CONGELAMOS toda la app
         v_confirm_cierre.visible = False
-        dlg_cargando.open = True
+        page.disabled = True # <--- ESTO BLOQUEA TODOS LOS BOTONES DE LA APP
+        
+        # 2. Mostramos aviso en el SnackBar azul
+        page.snack_bar = ft.SnackBar(ft.Text("🔄 Procesando cierre y enviando correo... por favor espera."), bgcolor="blue", duration=60000)
+        page.snack_bar.open = True
         page.update()
         
         ejecutar_cierre_final.en_proceso = True
         threading.Thread(target=proceso_cierre_background, args=(), daemon=True).start()
 
     def proceso_cierre_background():
-        # ESTA FUNCIÓN CORRE EN SEGUNDO PLANO
         try:
             # 1. Verificación de configuración
             config = mailer.cargar_configuracion()
             if not config:
+                v_confirm_cierre.visible = True
+                page.disabled = False # <--- Desbloquear si falla
                 page.snack_bar = ft.SnackBar(ft.Text("⚠️ Configuración de correo incompleta."), bgcolor="red")
-                page.snack_bar.open = True
-                page.update()
                 return 
 
             # 2. Recopilación de datos
             ventas = db.db_obtener_ventas_activas()
             if not ventas:
+                v_confirm_cierre.visible = True
+                page.disabled = False # <--- Desbloquear si falla
                 page.snack_bar = ft.SnackBar(ft.Text("No hay ventas para cerrar."), bgcolor="orange")
-                page.snack_bar.open = True
-                page.update()
                 return
 
             total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0
@@ -1205,34 +1213,29 @@ def main(page: ft.Page):
             if exito:
                 db.db_ejecutar_cierre_caja() # SOLO BORRAMOS SI EL CORREO FUE ÉXITO
                 
-                # Actualizar UI
                 txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
                 txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"
                 txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
                 txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"
+                
+                # --- ÉXITO: DESBLOQUEAMOS Y PASAMOS AL RESUMEN ---
+                page.disabled = False 
                 v_resumen_cierre.visible = True
                 page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado y cierre completado."), bgcolor="green")
             else:
-                v_confirm_cierre.visible = True # Permitir reintentar
+                v_confirm_cierre.visible = True 
+                page.disabled = False # <--- Desbloquear si falló el correo
                 page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al enviar: {mensaje}"), bgcolor="red")
             
         except Exception as ex:
             v_confirm_cierre.visible = True
+            page.disabled = False # <--- Desbloquear si hubo error crítico
             page.snack_bar = ft.SnackBar(ft.Text(f"Error crítico: {str(ex)}"), bgcolor="red")
         
         finally:
-            # 1. Aseguramos que el estado del diálogo sea False
-            dlg_cargando.open = False
-            
-            # 2. ACTUALIZACIÓN EXPLÍCITA (Este es el secreto)
-            # Primero actualizamos solo el componente afectado
-            dlg_cargando.update() 
-            
-            # 3. Refrescamos la página completa
+            # Forzamos la actualización completa
             page.snack_bar.open = True
             page.update()
-            
-            # 4. Liberamos el escudo
             ejecutar_cierre_final.en_proceso = False
 
     def actualizar_reporte_admin():
