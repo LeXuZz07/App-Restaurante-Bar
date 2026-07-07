@@ -117,6 +117,18 @@ def main(page: ft.Page):
     # No olvides agregarlo a page.overlay
     page.overlay.append(dlg_alerta_config)
 
+    # Diálogo de espera (bloqueante)
+    dlg_cargando = ft.AlertDialog(
+        modal=True, # Esto es lo que bloquea todo el resto de la App
+        title=ft.Text("Procesando cierre", text_align="center"),
+        content=ft.Column([
+            ft.ProgressRing(),
+            ft.Text("Enviando reportes... por favor espera.", text_align="center")
+        ], tight=True, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+    )
+    # Lo agregamos al overlay para que sea global
+    page.overlay.append(dlg_cargando)
+
     # ==========================================
     # 1. DECLARACIÓN DE VARIABLES Y CONTROLES
     # ==========================================
@@ -1130,18 +1142,37 @@ def main(page: ft.Page):
         page.update()
 
     def ejecutar_cierre_final(e):
-        # Verificamos si existe la configuración antes de hacer nada.
-        config = mailer.cargar_configuracion()
-        if not config:
-            # Si no hay config, abrimos el diálogo y salimos inmediatamente de la función.
-            dlg_alerta_config.open = True
-            page.update()
-            return  # El 'return' detiene la ejecución aquí mismo. Nada más ocurre.
-        # ------------------------------------------
+        if not v_confirm_cierre.visible: return
+        if hasattr(ejecutar_cierre_final, "en_proceso") and ejecutar_cierre_final.en_proceso: return
+        
+        # Ocultamos la advertencia Y mostramos el diálogo de carga bloqueante
+        v_confirm_cierre.visible = False
+        dlg_cargando.open = True
+        page.update()
+        
+        ejecutar_cierre_final.en_proceso = True
+        threading.Thread(target=proceso_cierre_background, args=(), daemon=True).start()
+
+    def proceso_cierre_background():
+        # ESTA FUNCIÓN CORRE EN SEGUNDO PLANO
         try:
+            # 1. Verificación de configuración
+            config = mailer.cargar_configuracion()
+            if not config:
+                page.snack_bar = ft.SnackBar(ft.Text("⚠️ Configuración de correo incompleta."), bgcolor="red")
+                page.snack_bar.open = True
+                page.update()
+                return 
+
+            # 2. Recopilación de datos
             ventas = db.db_obtener_ventas_activas()
+            if not ventas:
+                page.snack_bar = ft.SnackBar(ft.Text("No hay ventas para cerrar."), bgcolor="orange")
+                page.snack_bar.open = True
+                page.update()
+                return
+
             total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0
-            
             productos_vendidos = {}
             for v in ventas:
                 metodo = v[4]
@@ -1161,51 +1192,48 @@ def main(page: ft.Page):
                             productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + q
                         except: pass
 
-            # 1. GENERAR EL EXCEL
+            # 3. Generación de archivos
             ruta_excel = rp.generar_excel_cierre(ventas, total_caja, efe, tar, db.db_obtener_tablet_id(), productos_vendidos)
-            
-            # 2. GENERAR LAS GRÁFICAS COMO IMAGEN
             base_path = os.path.dirname(ruta_excel)
             img1, img2 = rp.generar_graficas_imagenes(efe, tar, productos_vendidos, base_path)
-            
-            # 3. PREPARAR LISTA DE ADJUNTOS (Excel + Imágenes)
             lista_adjuntos = [ruta_excel, img1]
-            if img2:
-                lista_adjuntos.append(img2)
+            if img2: lista_adjuntos.append(img2)
             
-            # 4. ENVIAR POR CORREO
+            # 4. INTENTO DE ENVÍO
             exito, mensaje = mailer.enviar_reporte_cierre(lista_adjuntos)
             
-            if not exito:
-                # Si el error es específicamente de configuración
-                if "Error de configuración" in mensaje:
-                    dlg_alerta_config.open = True
-                    page.update()
-                else:
-                    # Si es otro error (ej. falta internet), mostramos el snackbar rojo
-                    page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error: {mensaje}"), bgcolor="red")
-                    page.snack_bar.open = True
-                    page.update()
+            if exito:
+                db.db_ejecutar_cierre_caja() # SOLO BORRAMOS SI EL CORREO FUE ÉXITO
+                
+                # Actualizar UI
+                txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
+                txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"
+                txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
+                txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"
+                v_resumen_cierre.visible = True
+                page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado y cierre completado."), bgcolor="green")
             else:
-                page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado al correo con gráficas."), bgcolor="green")
-                page.snack_bar.open = True
-                page.update()
-            
-            # 5. FINALIZAR PROCESO DE CIERRE
-            db.db_ejecutar_cierre_caja()
-            v_confirm_cierre.visible = False
-            txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
-            txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"
-            txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
-            txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"
-            v_resumen_cierre.visible = True
-            page.update()
+                v_confirm_cierre.visible = True # Permitir reintentar
+                page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al enviar: {mensaje}"), bgcolor="red")
             
         except Exception as ex:
-            v_confirm_cierre.visible = False
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error al generar/enviar reporte: {str(ex)}"), bgcolor="red")
+            v_confirm_cierre.visible = True
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error crítico: {str(ex)}"), bgcolor="red")
+        
+        finally:
+            # 1. Aseguramos que el estado del diálogo sea False
+            dlg_cargando.open = False
+            
+            # 2. ACTUALIZACIÓN EXPLÍCITA (Este es el secreto)
+            # Primero actualizamos solo el componente afectado
+            dlg_cargando.update() 
+            
+            # 3. Refrescamos la página completa
             page.snack_bar.open = True
             page.update()
+            
+            # 4. Liberamos el escudo
+            ejecutar_cierre_final.en_proceso = False
 
     def actualizar_reporte_admin():
         ventas = db.db_obtener_ventas_activas(); col_reportes_dia.controls.clear()
@@ -1224,7 +1252,7 @@ def main(page: ft.Page):
     def refrescar_lista_gestion():
         col_lista_prods.controls.clear()
         for p in db.db_obtener_productos():
-            tf = ft.TextField(value=str(p[2]), width=100, height=40, text_size=14)
+            tf = ft.TextField(value=str(p[2]), width=100, content_padding=ft.padding.symmetric(horizontal=10, vertical=5), text_size=14)
             col_lista_prods.controls.append(ft.Row([ft.Text(f"{p[1]} ({p[3]})", expand=True), tf, ft.TextButton("ACTUALIZAR", on_click=lambda e, idx=p[0], campo=tf: intentar_actualizar_precio(idx, campo.value)), ft.TextButton("BORRAR", on_click=lambda e, idx=p[0]: [db.db_eliminar_producto(idx), refrescar_lista_gestion()], style=ft.ButtonStyle(color="red"))]))
         page.update()
 
