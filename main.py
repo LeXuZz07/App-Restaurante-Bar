@@ -1146,6 +1146,91 @@ def main(page: ft.Page):
         dlg_impresora.open = True
         page.update()
 
+
+    def ejecutar_cierre_final(e):
+        # 1. PROTECCIÓN INMEDIATA ANTI-DOBLE CLIC (SÍNCRONA)
+        # Si el diálogo ya se ocultó, ignoramos olímpicamente cualquier clic extra encolado
+        if not v_confirm_cierre.visible:
+            return
+
+        # Ocultamos la advertencia al instante
+        v_confirm_cierre.visible = False
+        page.update() # Le dice a la tablet que esconda el botón inmediatamente
+
+        try:
+            # 2. Verificación profunda de configuración
+            config = mailer.cargar_configuracion()
+            if not config or not config.get("EMAIL_REMITENTE") or not config.get("EMAIL_PASSWORD"):
+                dlg_alerta_config.open = True
+                v_confirm_cierre.visible = True # Permitimos reintentar si lo corrige
+                page.update()
+                return 
+
+            # 3. Recopilación de datos reales
+            ventas = db.db_obtener_ventas_activas()
+            if not ventas:
+                page.snack_bar = ft.SnackBar(ft.Text("⚠️ No hay ventas para cerrar."), bgcolor="orange")
+                page.snack_bar.open = True
+                v_confirm_cierre.visible = True
+                page.update()
+                return
+
+            total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0
+            productos_vendidos = {}
+            for v in ventas:
+                metodo = v[4]
+                if metodo.lower() == "efectivo": efe += v[2]
+                elif metodo.lower() == "tarjeta": tar += v[2]
+                elif metodo.startswith("Mixto:"):
+                    partes = metodo.split(":")
+                    efe += float(partes[1]); tar += float(partes[2])
+                
+                lineas = v[1].split('\n')
+                for linea in lineas:
+                    if "x " in linea and not linea.startswith("  ->"):
+                        try:
+                            partes = linea.split("x ", 1)
+                            q = int(partes[0].strip())
+                            nombre = partes[1].split("*")[0].strip()
+                            productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + q
+                        except: pass
+
+            # 4. Generación de archivos (Excel + Imágenes)
+            ruta_excel = rp.generar_excel_cierre(ventas, total_caja, efe, tar, db.db_obtener_tablet_id(), productos_vendidos)
+            base_path = os.path.dirname(ruta_excel)
+            img1, img2 = rp.generar_graficas_imagenes(efe, tar, productos_vendidos, base_path)
+            lista_adjuntos = [ruta_excel, img1]
+            if img2: lista_adjuntos.append(img2)
+            
+            # 5. INTENTO DE ENVÍO POR CORREO
+            exito, mensaje = mailer.enviar_reporte_cierre(lista_adjuntos)
+            
+            if exito:
+                # --- PROCESO ATÓMICO: SÓLO SI EL CORREO SALIÓ, BORRAMOS LA BASE DE DATOS ---
+                db.db_ejecutar_cierre_caja() 
+                
+                # Cargamos los datos en la pantalla de resumen
+                txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
+                txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"
+                txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
+                txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"
+                
+                # Cambiamos a la pantalla de resumen automáticamente
+                v_resumen_cierre.visible = True
+                page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado y cierre completado."), bgcolor="green")
+            else:
+                # Si el correo falla, dejamos los datos intactos para poder reintentar
+                v_confirm_cierre.visible = True 
+                page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al enviar: {mensaje}. Intenta de nuevo."), bgcolor="red")
+            
+        except Exception as ex:
+            v_confirm_cierre.visible = True
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error crítico: {str(ex)}"), bgcolor="red")
+        
+        # 6. UN SOLO UPDATE AL FINAL: Aplica la transición de pantalla de forma nativa
+        page.snack_bar.open = True
+        page.update()
+    """"
     def ejecutar_cierre_final(e):
         if not v_confirm_cierre.visible: return
         if hasattr(ejecutar_cierre_final, "en_proceso") and ejecutar_cierre_final.en_proceso: return
@@ -1237,6 +1322,7 @@ def main(page: ft.Page):
             page.snack_bar.open = True
             page.update()
             ejecutar_cierre_final.en_proceso = False
+    """
 
     def actualizar_reporte_admin():
         ventas = db.db_obtener_ventas_activas(); col_reportes_dia.controls.clear()
