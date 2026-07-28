@@ -1,3 +1,7 @@
+import warnings
+# Silencia avisos de librerías para maximizar rendimiento de consola
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 import flet as ft
 from datetime import datetime
 import os
@@ -430,8 +434,21 @@ def main(page: ft.Page):
     )
 
     # =======================================================
-    # 1.8 DIÁLOGO DE SELECCIÓN DE IMPRESORA
+    # 1.8 DIÁLOGO DE SELECCIÓN DE IMPRESORA (ASÍNCRONO EN THREAD)
     # =======================================================
+    def enviar_a_impresora_worker(ip, destino, ticket_bytes):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2.0)
+            s.connect((ip, 9100))
+            s.sendall(ticket_bytes)
+            s.close()
+            page.snack_bar = ft.SnackBar(ft.Text(f"¡Ticket enviado a {destino}!"), bgcolor="green")
+        except Exception as ex:
+            page.snack_bar = ft.SnackBar(ft.Text(f"Error al conectar con {destino} ({ip}): {ex}"), bgcolor="red")
+        page.snack_bar.open = True
+        page.update()
+
     def enviar_a_impresora(destino):
         if destino == "BARRA":
             ip, _ = db.db_obtener_ips()
@@ -443,19 +460,11 @@ def main(page: ft.Page):
             page.snack_bar = ft.SnackBar(ft.Text("Error: No hay ticket para imprimir."), bgcolor="red")
             page.snack_bar.open = True; page.update(); return
 
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2.0)
-            s.connect((ip, 9100))
-            s.sendall(ticket_bytes)
-            s.close()
-            page.snack_bar = ft.SnackBar(ft.Text(f"¡Ticket enviado a {destino}!"), bgcolor="green")
-        except Exception as ex:
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error al conectar con {destino} ({ip}): {ex}"), bgcolor="red")
-
         dlg_impresora.open = False
-        page.snack_bar.open = True
         page.update()
+        
+        # Envío en hilo secundario para evitar congelar la interfaz
+        threading.Thread(target=enviar_a_impresora_worker, args=(ip, destino, ticket_bytes), daemon=True).start()
 
     dlg_impresora = ft.AlertDialog(
         title=ft.Text("¿Dónde deseas imprimir?"),
@@ -1036,7 +1045,7 @@ def main(page: ft.Page):
             s.sendall(ticket) 
             s.close()
         except Exception as ex:
-            print(f"Error interno al imprimir en {destino} ({ip}): {ex}")
+            pass # Ignoramos el print directo a consola
 
     def enviar_comanda(e):
         m_id = estado["mesa"]
@@ -1055,8 +1064,11 @@ def main(page: ft.Page):
         
         ip_barra, ip_cocina = db.db_obtener_ips()
         
-        enviar_ticket_red(ip_barra, "BARRA", items_barra, m_id, texto_tipo)
-        enviar_ticket_red(ip_cocina, "COCINA", items_cocina, m_id, texto_tipo)
+        # Enviar comandos en hilos de fondo para no trabar la interfaz del mesero
+        if items_barra:
+            threading.Thread(target=enviar_ticket_red, args=(ip_barra, "BARRA", items_barra, m_id, texto_tipo), daemon=True).start()
+        if items_cocina:
+            threading.Thread(target=enviar_ticket_red, args=(ip_cocina, "COCINA", items_cocina, m_id, texto_tipo), daemon=True).start()
 
         db.db_marcar_enviados(m_id)
         for i in cuentas[m_id]: i["enviado"] = True
@@ -1287,7 +1299,7 @@ def main(page: ft.Page):
         page.update()
 
     # =======================================================
-    # FILTRADO DINÁMICO OPTIMIZADO (USANDO CACHE DE RAM)
+    # FILTRADO DINÁMICO OPTIMIZADO
     # =======================================================
     def filtrar_menu_dinamico():
         query = txt_busqueda_producto.value.strip().lower() if txt_busqueda_producto.value else ""
@@ -1300,7 +1312,6 @@ def main(page: ft.Page):
         grid_prods.controls.clear()
         grid = ft.GridView(runs_count=3, spacing=10, max_extent=150, expand=True) 
 
-        # Filtra directo sobre la lista en memoria RAM (ultra rápido)
         for p in cache_productos:
             nombre_p = p[1]
             precio_p = p[2]
