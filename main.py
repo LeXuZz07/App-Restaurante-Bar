@@ -1,5 +1,4 @@
 import warnings
-# Silencia avisos de librerías para maximizar rendimiento de consola
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import flet as ft
@@ -71,12 +70,28 @@ def main(page: ft.Page):
 
     page.clean()
 
-    # --- CACHE DE PRODUCTOS EN RAM (ULTRA RÁPIDO) ---
+    # --- CACHE DE PRODUCTOS EN RAM ---
     cache_productos = db.db_obtener_productos()
 
     def recargar_cache_productos():
         nonlocal cache_productos
         cache_productos = db.db_obtener_productos()
+
+    # --- NOMBRE DE NEGOCIO DINÁMICO (CORREGIDO) ---
+    def al_cambiar_nombre_negocio(e):
+        nuevo_val = txt_nombre_negocio.value.strip() or "Sistema de Restaurante"
+        db.db_actualizar_nombre_negocio(nuevo_val)
+
+    txt_nombre_negocio = ft.TextField(
+        value=db.db_obtener_nombre_negocio(),
+        hint_text="Escribe el nombre del negocio...",
+        text_size=24,
+        text_style=ft.TextStyle(weight=ft.FontWeight.BOLD),
+        border=ft.InputBorder.UNDERLINE,
+        width=350,
+        content_padding=ft.padding.only(bottom=5),
+        on_change=al_cambiar_nombre_negocio
+    )
 
     # Variables para el diálogo de configuración de correo
     txt_conf_email = ft.TextField(label="Correo Electrónico (Gmail)", width=350)
@@ -434,7 +449,7 @@ def main(page: ft.Page):
     )
 
     # =======================================================
-    # 1.8 DIÁLOGO DE SELECCIÓN DE IMPRESORA (ASÍNCRONO EN THREAD)
+    # 1.8 DIÁLOGO DE SELECCIÓN DE IMPRESORA
     # =======================================================
     def enviar_a_impresora_worker(ip, destino, ticket_bytes):
         try:
@@ -463,7 +478,6 @@ def main(page: ft.Page):
         dlg_impresora.open = False
         page.update()
         
-        # Envío en hilo secundario para evitar congelar la interfaz
         threading.Thread(target=enviar_a_impresora_worker, args=(ip, destino, ticket_bytes), daemon=True).start()
 
     dlg_impresora = ft.AlertDialog(
@@ -526,6 +540,7 @@ def main(page: ft.Page):
         user_input_receptor.value = ""; pass_input_receptor.value = ""
         txt_busqueda_producto.value = ""
         categoria_activa["nombre"] = None
+        txt_nombre_negocio.value = db.db_obtener_nombre_negocio()
         v_mesas.visible = True
         inicializar_salon()
         page.update()
@@ -1044,8 +1059,8 @@ def main(page: ft.Page):
             s.connect((ip, 9100))
             s.sendall(ticket) 
             s.close()
-        except Exception as ex:
-            pass # Ignoramos el print directo a consola
+        except Exception:
+            pass
 
     def enviar_comanda(e):
         m_id = estado["mesa"]
@@ -1064,7 +1079,6 @@ def main(page: ft.Page):
         
         ip_barra, ip_cocina = db.db_obtener_ips()
         
-        # Enviar comandos en hilos de fondo para no trabar la interfaz del mesero
         if items_barra:
             threading.Thread(target=enviar_ticket_red, args=(ip_barra, "BARRA", items_barra, m_id, texto_tipo), daemon=True).start()
         if items_cocina:
@@ -1135,7 +1149,7 @@ def main(page: ft.Page):
             txt_mixto_error.value = "⚠️ Error en los datos ingresados"; page.update()
 
     # =======================================================
-    # IMPRESIÓN, REIMPRESIÓN Y PRE-TICKET
+    # IMPRESIÓN, REIMPRESIÓN Y PRE-TICKET (CON NOMBRE DINÁMICO)
     # =======================================================
     def accion_imprimir_preticket(e):
         m_id = estado["mesa"]
@@ -1147,8 +1161,10 @@ def main(page: ft.Page):
             return
 
         total = sum(i['p'] * i['q'] for i in items)
+        nombre_negocio = db.db_obtener_nombre_negocio().upper()
+        nombre_bytes = limpiar_texto(nombre_negocio).encode('ascii', errors='ignore')
 
-        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== PRE-CUENTA ===\nHOTEL HACIENDA REAL\n" + b'\x1B\x45\x00'
+        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== PRE-CUENTA ===\n" + nombre_bytes + b"\n" + b'\x1B\x45\x00'
         ticket += "*** NO ES UN TICKET DE PAGO ***\n".encode('ascii', errors='ignore')
         ticket += f"MESA: {m_id}\nFECHA: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n".encode('ascii', errors='ignore')
         ticket += b'\x1B\x61\x00' + ("-" * 32 + "\n").encode('ascii', errors='ignore')
@@ -1172,8 +1188,10 @@ def main(page: ft.Page):
             page.snack_bar = ft.SnackBar(ft.Text("No hay datos para imprimir."), bgcolor="red"); page.snack_bar.open = True; page.update(); return
         
         items = ticket_data["items"]; mesa = ticket_data["mesa"]; total = ticket_data["total"]; metodo = ticket_data["metodo"]
-        
-        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== TICKET DE VENTA ===\nHOTEL HACIENDA REAL\n" + b'\x1B\x45\x00' 
+        nombre_negocio = db.db_obtener_nombre_negocio().upper()
+        nombre_bytes = limpiar_texto(nombre_negocio).encode('ascii', errors='ignore')
+
+        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== TICKET DE VENTA ===\n" + nombre_bytes + b"\n" + b'\x1B\x45\x00' 
         ticket += f"MESA: {mesa}\nFECHA: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n".encode('ascii', errors='ignore') 
         ticket += b'\x1B\x61\x00' + ("-" * 32 + "\n").encode('ascii', errors='ignore')
         
@@ -1190,7 +1208,10 @@ def main(page: ft.Page):
         page.update()
 
     def accion_reimprimir_ticket(mesa, detalle, total, fecha, metodo):
-        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== COPIA DE TICKET ===\nHOTEL HACIENDA REAL\n" + b'\x1B\x45\x00' 
+        nombre_negocio = db.db_obtener_nombre_negocio().upper()
+        nombre_bytes = limpiar_texto(nombre_negocio).encode('ascii', errors='ignore')
+
+        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== COPIA DE TICKET ===\n" + nombre_bytes + b"\n" + b'\x1B\x45\x00' 
         ticket += f"MESA: {mesa}\nFECHA: {fecha}\n".encode('ascii', errors='ignore') 
         ticket += b'\x1B\x61\x00' + ("-" * 32 + "\n").encode('ascii', errors='ignore')
         
@@ -1433,7 +1454,7 @@ def main(page: ft.Page):
     
     v_bloqueo_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("CONFIGURACIÓN DE MESAS", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"), ft.Row([txt_config_num_mesas, txt_ip_barra, txt_ip_cocina, ft.ElevatedButton("GUARDAR AJUSTES", bgcolor="blue", color="white", on_click=guardar_ajustes_salon), ft.ElevatedButton("CAMBIAR LOGO", bgcolor="purple", color="white", on_click=lambda _: [setattr(txt_logo_url, 'value', ''), setattr(txt_estado_descarga, 'value', ''), setattr(dlg_logo, 'open', True), page.update()]), ft.ElevatedButton("BORRAR LOGO", bgcolor="red", color="white", on_click=borrar_logo)], scroll="auto"), ft.Text("Toca una mesa para cambiar su estado. Verde = Libre | Rojo = Bloqueada", color="grey"), ft.Divider(), grid_bloqueo]), visible=False, expand=True, padding=30, bgcolor="white")
     
-    v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("Sistema de Restaurante", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.ElevatedButton("RECIBIR CORTES", bgcolor="purple", color="white", on_click=ir_a_login_receptor), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
+    v_mesas = ft.Container(content=ft.Column([ft.Row([txt_nombre_negocio, ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.ElevatedButton("RECIBIR CORTES", bgcolor="purple", color="white", on_click=ir_a_login_receptor), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
     
     btn_preticket = ft.ElevatedButton(
         "📄 PRE-TICKET", 

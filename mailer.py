@@ -5,6 +5,7 @@ from email.mime.application import MIMEApplication
 import os
 import json
 from datetime import datetime
+import database as db
 
 def cargar_configuracion():
     """Carga las credenciales desde el archivo config.json."""
@@ -16,13 +17,16 @@ def cargar_configuracion():
     with open(ruta_config, 'r') as f:
         return json.load(f)
 
-def enviar_reporte_cierre(ruta_excel_adjunto):
+def enviar_reporte_cierre(ruta_excel_adjunto, nombre_negocio=None):
     """
     Envía el archivo Excel generado al correo configurado en config.json.
     """
     config = cargar_configuracion()
     if not config:
         return False, "Error de configuración."
+
+    if not nombre_negocio:
+        nombre_negocio = db.db_obtener_nombre_negocio()
 
     remitente = config['EMAIL_REMITENTE']
     password = config['EMAIL_PASSWORD']
@@ -34,16 +38,15 @@ def enviar_reporte_cierre(ruta_excel_adjunto):
     msg['To'] = destinatario
     
     fecha_hoy = datetime.now().strftime('%Y-%m-%d')
-    msg['Subject'] = f"Corte de Caja - {fecha_hoy} - POS Hacienda Real"
+    msg['Subject'] = f"Corte de Caja - {fecha_hoy} - {nombre_negocio}"
     
     cuerpo = (
-        "Reporte cierre de caja,\n\n"
+        f"Reporte de Cierre de Caja ({nombre_negocio}),\n\n"
         "Se adjuntan los archivos con el detalle de las ventas y las estadísticas.\n\n"
     )
     msg.attach(MIMEText(cuerpo, 'plain'))
     
-    # --- ADJUNTAR ARCHIVOS (Cambiado a bucle para manejar lista) ---
-    for ruta_archivo in ruta_excel_adjunto: # Ahora espera una lista
+    for ruta_archivo in ruta_excel_adjunto:
         if not os.path.exists(ruta_archivo):
             return False, f"El archivo no existe: {ruta_archivo}"
             
@@ -55,7 +58,6 @@ def enviar_reporte_cierre(ruta_excel_adjunto):
         except Exception as e:
             return False, f"Error al adjuntar {ruta_archivo}: {e}"
 
-    # Envío SMTP
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()

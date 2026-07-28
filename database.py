@@ -2,7 +2,6 @@ import sqlite3
 from datetime import datetime
 import os
 
-# Variable global para almacenar la ruta en RAM tras el primer chequeo
 _DB_PATH_CACHE = None
 
 def get_db_path():
@@ -68,6 +67,10 @@ def init_db():
     cursor.execute("SELECT valor FROM configuracion WHERE clave='ip_cocina'")
     if not cursor.fetchone(): cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('ip_cocina', '127.0.0.1')")
 
+    # NUEVO: Nombre del negocio dinámico
+    cursor.execute("SELECT valor FROM configuracion WHERE clave='nombre_negocio'")
+    if not cursor.fetchone(): cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('nombre_negocio', 'Sistema de Restaurante')")
+
     cursor.execute("SELECT count(*) FROM categorias")
     if cursor.fetchone()[0] == 0: cursor.executemany("INSERT INTO categorias (nombre) VALUES (?)", [("BEBIDAS",), ("COMIDA",), ("POSTRES",)])
         
@@ -81,6 +84,17 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+def db_obtener_nombre_negocio():
+    conn = get_db_connection()
+    res = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='nombre_negocio'").fetchone()
+    conn.close()
+    return res[0] if res and res[0] else "Sistema de Restaurante"
+
+def db_actualizar_nombre_negocio(nuevo_nombre):
+    conn = get_db_connection()
+    conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='nombre_negocio'", (nuevo_nombre,))
+    conn.commit(); conn.close()
 
 def db_obtener_categorias():
     conn = get_db_connection()
