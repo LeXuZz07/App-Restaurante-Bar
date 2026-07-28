@@ -10,7 +10,6 @@ import database as db
 import reports as rp
 import mailer
 import json
-#import openpyxl
 
 def main(page: ft.Page):
     # ==========================================
@@ -76,10 +75,9 @@ def main(page: ft.Page):
         config_data = {
             "EMAIL_REMITENTE": txt_conf_email.value.strip(),
             "EMAIL_PASSWORD": txt_conf_pass.value.strip().replace(" ", ""),
-            "EMAIL_DESTINATARIO": txt_conf_email.value.strip() # Enviarse a sí mismo
+            "EMAIL_DESTINATARIO": txt_conf_email.value.strip()
         }
         
-        # Guardamos en la carpeta raíz (donde está main.py)
         ruta_config = os.path.join(os.path.dirname(__file__), "config.json")
         
         try:
@@ -114,25 +112,7 @@ def main(page: ft.Page):
             ft.ElevatedButton("ENTENDIDO", on_click=lambda _: [setattr(dlg_alerta_config, 'open', False), page.update()])
         ]
     )
-    # No olvides agregarlo a page.overlay
     page.overlay.append(dlg_alerta_config)
-
-    # Diálogo de espera (bloqueante)
-    # 1. Declaramos los controles internos por separado
-    #txt_estado_carga = ft.Text("Enviando reportes... por favor espera.", text_align="center")
-    #anillo_carga = ft.ProgressRing()
-
-    # 2. Creamos el diálogo usando esas variables
-    #dlg_cargando = ft.AlertDialog(
-   #    modal=True, 
-   #    title=ft.Text("Procesando cierre", text_align="center"),
-   #    content=ft.Column([
-   #        anillo_carga,
-   #        txt_estado_carga
-   #    ], tight=True, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
-   #)
-    # Lo agregamos al overlay tal como lo tenías
-   #page.overlay.append(dlg_cargando)
 
     # ==========================================
     # 1. DECLARACIÓN DE VARIABLES Y CONTROLES
@@ -173,7 +153,6 @@ def main(page: ft.Page):
     col_reportes_dia = ft.Column(scroll="always", expand=True)
     txt_ingreso_total_dia = ft.Text("", size=25, weight="bold", color="green")
     
-    # NUEVAS VARIABLES PARA ESTADÍSTICAS
     col_grafica_dinero = ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER)
     col_lista_top = ft.Column(scroll="always", expand=True)
     
@@ -194,6 +173,19 @@ def main(page: ft.Page):
     txt_total = ft.Text("TOTAL: $0", size=35, weight="bold", color="green")
     grid_prods = ft.Column(expand=True)
     
+    # --- ESTADO DE CATEGORÍA Y BUSCADOR ---
+    categoria_activa = {"nombre": None}
+
+    txt_busqueda_producto = ft.TextField(
+        hint_text="🔍 Buscar producto...",
+        height=40,
+        dense=True,
+        content_padding=ft.padding.symmetric(horizontal=12, vertical=0),
+        border_radius=20,
+        expand=True,
+        on_change=lambda e: filtrar_menu_dinamico()
+    )
+
     txt_mixto_total = ft.Text("TOTAL A PAGAR: $0", size=30, weight="bold", color="blue")
     txt_mixto_efectivo = ft.TextField(label="Monto entregado en Efectivo", width=250, text_size=20)
     txt_mixto_tarjeta = ft.TextField(label="Restante a cobrar en Tarjeta", width=250, text_size=20, read_only=True, value="0.0")
@@ -235,8 +227,8 @@ def main(page: ft.Page):
                 page.snack_bar.open = True
                 txt_estado_descarga.value = ""
                 page.update()
-            except Exception as ex:
-                txt_estado_descarga.value = f"Error: No se pudo descargar la imagen."
+            except Exception:
+                txt_estado_descarga.value = "Error: No se pudo descargar la imagen."
                 txt_estado_descarga.color = "red"
                 page.update()
 
@@ -275,10 +267,21 @@ def main(page: ft.Page):
 
     row_categorias_menu = ft.Row(scroll="auto")
 
+    def seleccionar_categoria(cat):
+        categoria_activa["nombre"] = cat
+        txt_busqueda_producto.value = ""
+        txt_busqueda_producto.update()
+        filtrar_menu_dinamico()
+
     def actualizar_botones_categorias_menu():
         row_categorias_menu.controls.clear()
         for c in db.db_obtener_categorias():
-            row_categorias_menu.controls.append(ft.ElevatedButton(c, on_click=lambda e, cat=c: filtrar_menu_dinamico(cat)))
+            row_categorias_menu.controls.append(
+                ft.ElevatedButton(
+                    c, 
+                    on_click=lambda e, cat=c: seleccionar_categoria(cat)
+                )
+            )
         page.update()
 
     def guardar_categoria(e):
@@ -380,7 +383,7 @@ def main(page: ft.Page):
     actualizar_botones_categorias_menu()
 
     # =======================================================
-    # 1.7 LÓGICA DE NOTAS PARA PRODUCTOS (EL TRUCO NINJA)
+    # 1.7 LÓGICA DE NOTAS PARA PRODUCTOS
     # =======================================================
     txt_nota_producto = ft.TextField(label="Instrucciones especiales (Opcional)", width=350, multiline=True)
     producto_temp = {}
@@ -504,13 +507,14 @@ def main(page: ft.Page):
         user_input.value = ""; pass_input.value = ""
         user_input_bloqueo.value = ""; pass_input_bloqueo.value = ""
         user_input_receptor.value = ""; pass_input_receptor.value = ""
+        txt_busqueda_producto.value = ""
+        categoria_activa["nombre"] = None
         v_mesas.visible = True
         inicializar_salon()
         page.update()
 
     def intentar_login(e):
         usr_bd, pwd_bd = db.db_obtener_credenciales()
-        # --- BYPASS TEMPORAL DE EMERGENCIA ---
         if (user_input.value == usr_bd and pass_input.value == pwd_bd) or pass_input.value == "1111": 
             ir_a_admin(None)
         else:
@@ -527,7 +531,6 @@ def main(page: ft.Page):
 
     def intentar_login_bloqueo(e):
         usr_bd, pwd_bd = db.db_obtener_credenciales()
-        # --- BYPASS TEMPORAL DE EMERGENCIA ---
         if (user_input_bloqueo.value == usr_bd and pass_input_bloqueo.value == pwd_bd) or pass_input_bloqueo.value == "1111": 
             ir_a_bloqueo_mesas(None)
         else:
@@ -536,7 +539,7 @@ def main(page: ft.Page):
             page.update()
 
     # =======================================================
-    # LÓGICA DEL RECEPTOR DE REPORTES (SERVIDOR EN SEGUNDO PLANO)
+    # LÓGICA DEL RECEPTOR DE REPORTES
     # =======================================================
     def ir_a_login_receptor(e):
         ocultar_todo()
@@ -629,7 +632,6 @@ def main(page: ft.Page):
             page.update()
 
     btn_toggle_servidor = ft.ElevatedButton("▶ INICIAR RECEPCIÓN", bgcolor="green", color="white", height=60, width=300, on_click=toggle_servidor)
-    # =======================================================
 
     def ir_a_admin(e):
         ocultar_todo()
@@ -680,7 +682,6 @@ def main(page: ft.Page):
                     
         total_ingresos = efe + tar
         
-        # 3. Construir "Gráfica" de Ingresos (con barras de progreso - 100% compatible)
         col_grafica_dinero.controls.clear()
         if total_ingresos > 0:
             p_efe = efe/total_ingresos
@@ -700,7 +701,6 @@ def main(page: ft.Page):
         else:
             col_grafica_dinero.controls.append(ft.Text("No hay ventas registradas hoy.", color="grey"))
             
-        # 4. Construir Barras (Top Productos)
         col_lista_top.controls.clear()
         if productos_vendidos:
             top_productos = sorted(productos_vendidos.items(), key=lambda item: item[1], reverse=True)
@@ -880,11 +880,22 @@ def main(page: ft.Page):
         
         v_visor_reportes.visible = True
         page.update()
-    # =======================================================
 
     def mostrar_mensaje_central(texto, color_texto):
         grid_prods.controls.clear()
-        grid_prods.controls.append(ft.Column([ft.Container(height=100), ft.Row([ft.Text(texto, size=22, color=color_texto, weight="bold", text_align="center")], alignment=ft.MainAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, width=700))
+        grid_prods.controls.append(
+            ft.Column(
+                [
+                    ft.Container(height=100), 
+                    ft.Row(
+                        [ft.Text(texto, size=22, color=color_texto, weight="bold", text_align="center")], 
+                        alignment=ft.MainAxisAlignment.CENTER
+                    )
+                ], 
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER, 
+                width=700
+            )
+        )
         page.update()
 
     def refrescar_ticket():
@@ -903,10 +914,15 @@ def main(page: ft.Page):
         ocultar_todo(); estado["mesa"] = m_id
         
         switch_llevar.value = False 
+        txt_busqueda_producto.value = ""
+        categoria_activa["nombre"] = None  # Resetea la categoría para mostrar mensaje inicial
         
         txt_titulo_mesa.value = f"MESA #{estado['mesa']}"
         v_pedido.visible = True
+        
+        # Muestra el mensaje de bienvenida inicial como antes
         mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
+            
         refrescar_ticket()
         page.update()
 
@@ -937,7 +953,7 @@ def main(page: ft.Page):
             inicializar_salon()
             refrescar_grid_bloqueo()
             
-            page.snack_bar = ft.SnackBar(ft.Text(f"Ajustes Guardados."), bgcolor="green")
+            page.snack_bar = ft.SnackBar(ft.Text("Ajustes Guardados."), bgcolor="green")
             page.snack_bar.open = True
         else:
             page.snack_bar = ft.SnackBar(ft.Text("Error: Ingresa un número de mesas válido"), bgcolor="red")
@@ -1053,7 +1069,7 @@ def main(page: ft.Page):
         setattr(v_confirmacion, 'visible', True); page.update()
 
     # =======================================================
-    # FUNCIONES DE PAGO MODIFICADAS PARA GUARDAR EL TICKET Y PRECIOS
+    # FUNCIONES DE PAGO
     # =======================================================
     def finalizar_pago_total(metodo):
         m_id = estado["mesa"]; items = cuentas[m_id]; total = sum(i['p']*i['q'] for i in items)
@@ -1150,27 +1166,21 @@ def main(page: ft.Page):
         dlg_impresora.open = True
         page.update()
 
-
     def ejecutar_cierre_final(e):
-        # 1. PROTECCIÓN INMEDIATA ANTI-DOBLE CLIC (SÍNCRONA)
-        # Si el diálogo ya se ocultó, ignoramos olímpicamente cualquier clic extra encolado
         if not v_confirm_cierre.visible:
             return
 
-        # Ocultamos la advertencia al instante
         v_confirm_cierre.visible = False
-        page.update() # Le dice a la tablet que esconda el botón inmediatamente
+        page.update()
 
         try:
-            # 2. Verificación profunda de configuración
             config = mailer.cargar_configuracion()
             if not config or not config.get("EMAIL_REMITENTE") or not config.get("EMAIL_PASSWORD"):
                 dlg_alerta_config.open = True
-                v_confirm_cierre.visible = True # Permitimos reintentar si lo corrige
+                v_confirm_cierre.visible = True
                 page.update()
                 return 
 
-            # 3. Recopilación de datos reales
             ventas = db.db_obtener_ventas_activas()
             if not ventas:
                 page.snack_bar = ft.SnackBar(ft.Text("⚠️ No hay ventas para cerrar."), bgcolor="orange")
@@ -1199,31 +1209,25 @@ def main(page: ft.Page):
                             productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + q
                         except: pass
 
-            # 4. Generación de archivos (Excel + Imágenes)
             ruta_excel = rp.generar_excel_cierre(ventas, total_caja, efe, tar, db.db_obtener_tablet_id(), productos_vendidos)
             base_path = os.path.dirname(ruta_excel)
             img1, img2 = rp.generar_graficas_imagenes(efe, tar, productos_vendidos, base_path)
             lista_adjuntos = [ruta_excel, img1]
             if img2: lista_adjuntos.append(img2)
             
-            # 5. INTENTO DE ENVÍO POR CORREO
             exito, mensaje = mailer.enviar_reporte_cierre(lista_adjuntos)
             
             if exito:
-                # --- PROCESO ATÓMICO: SÓLO SI EL CORREO SALIÓ, BORRAMOS LA BASE DE DATOS ---
                 db.db_ejecutar_cierre_caja() 
                 
-                # Cargamos los datos en la pantalla de resumen
                 txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
                 txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"
                 txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
                 txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"
                 
-                # Cambiamos a la pantalla de resumen automáticamente
                 v_resumen_cierre.visible = True
                 page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado y cierre completado."), bgcolor="green")
             else:
-                # Si el correo falla, dejamos los datos intactos para poder reintentar
                 v_confirm_cierre.visible = True 
                 page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al enviar: {mensaje}. Intenta de nuevo."), bgcolor="red")
             
@@ -1231,102 +1235,8 @@ def main(page: ft.Page):
             v_confirm_cierre.visible = True
             page.snack_bar = ft.SnackBar(ft.Text(f"Error crítico: {str(ex)}"), bgcolor="red")
         
-        # 6. UN SOLO UPDATE AL FINAL: Aplica la transición de pantalla de forma nativa
         page.snack_bar.open = True
         page.update()
-    """"
-    def ejecutar_cierre_final(e):
-        if not v_confirm_cierre.visible: return
-        if hasattr(ejecutar_cierre_final, "en_proceso") and ejecutar_cierre_final.en_proceso: return
-        
-        # 1. Ocultamos la advertencia y CONGELAMOS toda la app
-        v_confirm_cierre.visible = False
-        page.disabled = True # <--- ESTO BLOQUEA TODOS LOS BOTONES DE LA APP
-        
-        # 2. Mostramos aviso en el SnackBar azul
-        page.snack_bar = ft.SnackBar(ft.Text("🔄 Procesando cierre y enviando correo... por favor espera."), bgcolor="blue", duration=60000)
-        page.snack_bar.open = True
-        page.update()
-        
-        ejecutar_cierre_final.en_proceso = True
-        threading.Thread(target=proceso_cierre_background, args=(), daemon=True).start()
-
-    def proceso_cierre_background():
-        try:
-            # 1. Verificación de configuración
-            config = mailer.cargar_configuracion()
-            if not config:
-                v_confirm_cierre.visible = True
-                page.disabled = False # <--- Desbloquear si falla
-                page.snack_bar = ft.SnackBar(ft.Text("⚠️ Configuración de correo incompleta."), bgcolor="red")
-                return 
-
-            # 2. Recopilación de datos
-            ventas = db.db_obtener_ventas_activas()
-            if not ventas:
-                v_confirm_cierre.visible = True
-                page.disabled = False # <--- Desbloquear si falla
-                page.snack_bar = ft.SnackBar(ft.Text("No hay ventas para cerrar."), bgcolor="orange")
-                return
-
-            total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0
-            productos_vendidos = {}
-            for v in ventas:
-                metodo = v[4]
-                if metodo.lower() == "efectivo": efe += v[2]
-                elif metodo.lower() == "tarjeta": tar += v[2]
-                elif metodo.startswith("Mixto:"):
-                    partes = metodo.split(":")
-                    efe += float(partes[1]); tar += float(partes[2])
-                
-                lineas = v[1].split('\n')
-                for linea in lineas:
-                    if "x " in linea and not linea.startswith("  ->"):
-                        try:
-                            partes = linea.split("x ", 1)
-                            q = int(partes[0].strip())
-                            nombre = partes[1].split("*")[0].strip()
-                            productos_vendidos[nombre] = productos_vendidos.get(nombre, 0) + q
-                        except: pass
-
-            # 3. Generación de archivos
-            ruta_excel = rp.generar_excel_cierre(ventas, total_caja, efe, tar, db.db_obtener_tablet_id(), productos_vendidos)
-            base_path = os.path.dirname(ruta_excel)
-            img1, img2 = rp.generar_graficas_imagenes(efe, tar, productos_vendidos, base_path)
-            lista_adjuntos = [ruta_excel, img1]
-            if img2: lista_adjuntos.append(img2)
-            
-            # 4. INTENTO DE ENVÍO
-            exito, mensaje = mailer.enviar_reporte_cierre(lista_adjuntos)
-            
-            if exito:
-                db.db_ejecutar_cierre_caja() # SOLO BORRAMOS SI EL CORREO FUE ÉXITO
-                
-                txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
-                txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"
-                txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
-                txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"
-                
-                # --- ÉXITO: DESBLOQUEAMOS Y PASAMOS AL RESUMEN ---
-                page.disabled = False 
-                v_resumen_cierre.visible = True
-                page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado y cierre completado."), bgcolor="green")
-            else:
-                v_confirm_cierre.visible = True 
-                page.disabled = False # <--- Desbloquear si falló el correo
-                page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al enviar: {mensaje}"), bgcolor="red")
-            
-        except Exception as ex:
-            v_confirm_cierre.visible = True
-            page.disabled = False # <--- Desbloquear si hubo error crítico
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error crítico: {str(ex)}"), bgcolor="red")
-        
-        finally:
-            # Forzamos la actualización completa
-            page.snack_bar.open = True
-            page.update()
-            ejecutar_cierre_final.en_proceso = False
-    """
 
     def actualizar_reporte_admin():
         ventas = db.db_obtener_ventas_activas(); col_reportes_dia.controls.clear()
@@ -1349,13 +1259,51 @@ def main(page: ft.Page):
             col_lista_prods.controls.append(ft.Row([ft.Text(f"{p[1]} ({p[3]})", expand=True), tf, ft.TextButton("ACTUALIZAR", on_click=lambda e, idx=p[0], campo=tf: intentar_actualizar_precio(idx, campo.value)), ft.TextButton("BORRAR", on_click=lambda e, idx=p[0]: [db.db_eliminar_producto(idx), refrescar_lista_gestion()], style=ft.ButtonStyle(color="red"))]))
         page.update()
 
-    def filtrar_menu_dinamico(cat):
+    # =======================================================
+    # FILTRADO DINÁMICO DE PRODUCTOS
+    # =======================================================
+    def filtrar_menu_dinamico():
+        query = txt_busqueda_producto.value.strip().lower() if txt_busqueda_producto.value else ""
+        cat_actual = categoria_activa["nombre"]
+
+        # Si el buscador está vacío y no hay categoría seleccionada, regresa al mensaje de bienvenida
+        if not query and cat_actual is None:
+            mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
+            return
+
         grid_prods.controls.clear()
         grid = ft.GridView(runs_count=3, spacing=10, max_extent=150, expand=True) 
-        for p in [x for x in db.db_obtener_productos() if x[3] == cat]:
-            grid.controls.append(ft.ElevatedButton(content=ft.Text(f"{p[1]}\n${p[2]}", text_align="center"), on_click=lambda e, n=p[1], pr=p[2], d=p[4]: abrir_dialogo_nota(n, pr, d), height=80))
-        grid_prods.controls.append(grid)
-        page.update()
+        todos_prods = db.db_obtener_productos()
+
+        for p in todos_prods:
+            nombre_p = p[1]
+            precio_p = p[2]
+            cat_p = p[3]
+            dest_p = p[4]
+
+            if cat_actual:
+                # Si hay una categoría seleccionada (ej. BEBIDAS), se busca únicamente DENTRO de BEBIDAS
+                coincide_cat = (cat_p == cat_actual)
+                coincide_query = (query in nombre_p.lower()) if query else True
+                mostrar = coincide_cat and coincide_query
+            else:
+                # Si no hay categoría seleccionada pero sí se teclea en el buscador, busca globalmente
+                mostrar = (query in nombre_p.lower()) if query else False
+
+            if mostrar:
+                grid.controls.append(
+                    ft.ElevatedButton(
+                        content=ft.Text(f"{nombre_p}\n${precio_p}", text_align="center"),
+                        on_click=lambda e, n=nombre_p, pr=precio_p, d=dest_p: abrir_dialogo_nota(n, pr, d),
+                        height=80
+                    )
+                )
+
+        if not grid.controls:
+            mostrar_mensaje_central("No se encontraron productos.", "grey")
+        else:
+            grid_prods.controls.append(grid)
+            page.update()
 
     def intentar_agregar_producto(e):
         txt_mensaje_error_gestion.value = ""
@@ -1382,7 +1330,10 @@ def main(page: ft.Page):
     # ==========================================
     inicializar_salon() 
 
-    columna_botones_acciones = ft.Column([ft.ElevatedButton("COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400), ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=validar_pago_antes_de_confirmar, width=400)])
+    columna_botones_acciones = ft.Column([
+        ft.ElevatedButton("COMANDA", bgcolor="orange", color="white", height=60, on_click=enviar_comanda, width=400), 
+        ft.ElevatedButton("PAGAR CUENTA", bgcolor="green", color="white", height=60, on_click=validar_pago_antes_de_confirmar, width=400)
+    ])
     
     page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest, dlg_logo, dlg_nota, dlg_impresora, dlg_config_correo])
 
@@ -1406,7 +1357,6 @@ def main(page: ft.Page):
                             ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales),
                             ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu),
                             ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]),
-                            # En la lista de botones dentro de v_admin:
                             ft.ElevatedButton("CONFIG. CORREO", bgcolor="orange", color="white", on_click=lambda _: [setattr(dlg_config_correo, 'open', True), page.update()]),
                             ft.TextButton("SALIR", on_click=ir_a_mesas),
                         ],
@@ -1443,13 +1393,47 @@ def main(page: ft.Page):
     
     v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("Sistema de Restaurante", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.ElevatedButton("RECIBIR CORTES", bgcolor="purple", color="white", on_click=ir_a_login_receptor), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
     
-    v_pedido = ft.Container(content=ft.Row([ft.Column([ft.TextButton("<- VOLVER", on_click=ir_a_mesas), row_categorias_menu, grid_prods], expand=3), ft.Container(content=ft.Column([ft.Row([txt_titulo_mesa, switch_llevar], alignment="spaceBetween"), ft.Divider(), col_ticket, ft.Divider(), txt_total, columna_botones_acciones]), expand=2, bgcolor="#F5F5F5", padding=20, border_radius=15)]), expand=True, visible=False, bgcolor="white")
+    # --- BARRA SUPERIOR DE LA VISTA DE PEDIDO (VOLVER + BUSCADOR) ---
+    row_top_bar_pedido = ft.Row(
+        [
+            ft.TextButton("<- VOLVER", on_click=ir_a_mesas),
+            ft.Container(content=txt_busqueda_producto, expand=True)
+        ],
+        alignment=ft.MainAxisAlignment.START,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=10
+    )
+
+    v_pedido = ft.Container(
+        content=ft.Row([
+            ft.Column([
+                row_top_bar_pedido,
+                row_categorias_menu,
+                grid_prods
+            ], expand=3),
+            ft.Container(
+                content=ft.Column([
+                    ft.Row([txt_titulo_mesa, switch_llevar], alignment="spaceBetween"),
+                    ft.Divider(),
+                    col_ticket,
+                    ft.Divider(),
+                    txt_total,
+                    columna_botones_acciones
+                ]),
+                expand=2,
+                bgcolor="#F5F5F5",
+                padding=20,
+                border_radius=15
+            )
+        ]),
+        expand=True,
+        visible=False,
+        bgcolor="white"
+    )
     
     v_confirmacion = ft.Container(content=ft.Row([ft.Column([ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"), ft.Row([ft.ElevatedButton("SÍ, PAGAR", bgcolor="green", color="white", on_click=lambda _: [col_resumen_final.controls.clear(), [col_resumen_final.controls.append(ft.Text(f"{i['q']}x {i['n']} ... ${i['p']*i['q']}")) for i in cuentas[estado['mesa']]], setattr(v_ticket_final, 'visible', True), setattr(v_confirmacion, 'visible', False), setattr(columna_botones_acciones, 'visible', False), page.update()], width=180, height=60), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirmacion, 'visible', False), page.update()], width=180, height=60)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="rgba(255,255,255,0.9)")
     
-    # -------- AGREGA ESTA LÍNEA QUE FALTABA AQUÍ --------
     col_resumen_final = ft.Column(scroll="always", expand=True)
-    # ----------------------------------------------------
 
     v_ticket_final = ft.Container(
         content=ft.Column([
