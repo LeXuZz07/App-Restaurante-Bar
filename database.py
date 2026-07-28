@@ -2,10 +2,15 @@ import sqlite3
 from datetime import datetime
 import os
 
-# --- LÓGICA DE RUTA DINÁMICA DE FUERZA BRUTA ---
+# Variable global para almacenar la ruta en RAM tras el primer chequeo
+_DB_PATH_CACHE = None
+
 def get_db_path():
+    global _DB_PATH_CACHE
+    if _DB_PATH_CACHE:
+        return _DB_PATH_CACHE
+
     db_name = "pos_restaurante.db"
-    
     rutas_candidatas = [
         os.environ.get("HOME"),                              
         "/data/user/0/com.lexuzz07.pos_restaurante/files",    
@@ -14,23 +19,21 @@ def get_db_path():
         os.path.expanduser("~"),                              
         os.getcwd()                                           
     ]
-
     for ruta in rutas_candidatas:
         if ruta: 
             try:
-                if not os.path.exists(ruta):
-                    os.makedirs(ruta, exist_ok=True)
+                if not os.path.exists(ruta): os.makedirs(ruta, exist_ok=True)
                 archivo_prueba = os.path.join(ruta, "test_permiso.tmp")
-                with open(archivo_prueba, "w") as f:
-                    f.write("acceso concedido")
+                with open(archivo_prueba, "w") as f: f.write("acceso concedido")
                 os.remove(archivo_prueba) 
-                return os.path.join(ruta, db_name)
+                _DB_PATH_CACHE = os.path.join(ruta, db_name)
+                return _DB_PATH_CACHE
             except Exception:
                 continue
-    return db_name
+    _DB_PATH_CACHE = db_name
+    return _DB_PATH_CACHE
 
-def get_db_connection():
-    return sqlite3.connect(get_db_path())
+def get_db_connection(): return sqlite3.connect(get_db_path())
 
 def init_db():
     conn = get_db_connection()
@@ -39,53 +42,46 @@ def init_db():
     cursor.execute("CREATE TABLE IF NOT EXISTS items_activos (id INTEGER PRIMARY KEY AUTOINCREMENT, mesa_id INTEGER, nombre TEXT, precio REAL, cantidad INTEGER, destino TEXT, enviado INTEGER)")
     cursor.execute("CREATE TABLE IF NOT EXISTS productos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, precio REAL, categoria TEXT, destino TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS configuracion (clave TEXT PRIMARY KEY, valor TEXT)")
-    
     cursor.execute("CREATE TABLE IF NOT EXISTS categorias (nombre TEXT PRIMARY KEY)")
     cursor.execute("CREATE TABLE IF NOT EXISTS destinos (nombre TEXT PRIMARY KEY)")
     
     cursor.execute("SELECT valor FROM configuracion WHERE clave='tablet_id'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('tablet_id', '01')")
-
+    if not cursor.fetchone(): cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('tablet_id', '01')")
+    
     cursor.execute("SELECT valor FROM configuracion WHERE clave='num_mesas'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('num_mesas', '20')")
-
+    if not cursor.fetchone(): cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('num_mesas', '20')")
+    
     cursor.execute("SELECT valor FROM configuracion WHERE clave='admin_usr'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('admin_usr', 'admin')")
         cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('admin_pass', '1234')")
-
+        
     cursor.execute("SELECT valor FROM configuracion WHERE clave='mesas_bloqueadas'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('mesas_bloqueadas', '')")
-
-    # NUEVO: RUTA DEL LOGO
+    if not cursor.fetchone(): cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('mesas_bloqueadas', '')")
+    
     cursor.execute("SELECT valor FROM configuracion WHERE clave='logo_path'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('logo_path', '')")
+    if not cursor.fetchone(): cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('logo_path', '')")
+
+    cursor.execute("SELECT valor FROM configuracion WHERE clave='ip_barra'")
+    if not cursor.fetchone(): cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('ip_barra', '127.0.0.1')")
+    
+    cursor.execute("SELECT valor FROM configuracion WHERE clave='ip_cocina'")
+    if not cursor.fetchone(): cursor.execute("INSERT INTO configuracion (clave, valor) VALUES ('ip_cocina', '127.0.0.1')")
 
     cursor.execute("SELECT count(*) FROM categorias")
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany("INSERT INTO categorias (nombre) VALUES (?)", [("BEBIDAS",), ("COMIDA",), ("POSTRES",)])
+    if cursor.fetchone()[0] == 0: cursor.executemany("INSERT INTO categorias (nombre) VALUES (?)", [("BEBIDAS",), ("COMIDA",), ("POSTRES",)])
         
     cursor.execute("SELECT count(*) FROM destinos")
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany("INSERT INTO destinos (nombre) VALUES (?)", [("BARRA",), ("COCINA",)])
+    if cursor.fetchone()[0] == 0: cursor.executemany("INSERT INTO destinos (nombre) VALUES (?)", [("BARRA",), ("COCINA",)])
 
     cursor.execute("SELECT count(*) FROM productos")
     if cursor.fetchone()[0] == 0:
-        menu_inicial = [
-            ("Cerveza", 55, "BEBIDAS", "BARRA"), ("Refresco", 35, "BEBIDAS", "BARRA"),
-            ("Hamburguesa", 150, "COMIDA", "COCINA"), ("Tacos", 90, "COMIDA", "COCINA"),
-            ("Pizza", 200, "COMIDA", "COCINA"), ("Pastel", 60, "POSTRES", "COCINA")
-        ]
+        menu_inicial = [("Cerveza", 55, "BEBIDAS", "BARRA"), ("Refresco", 35, "BEBIDAS", "BARRA"), ("Hamburguesa", 150, "COMIDA", "COCINA"), ("Tacos", 90, "COMIDA", "COCINA"), ("Pizza", 200, "COMIDA", "COCINA"), ("Pastel", 60, "POSTRES", "COCINA")]
         cursor.executemany("INSERT INTO productos (nombre, precio, categoria, destino) VALUES (?,?,?,?)", menu_inicial)
     
     conn.commit()
     conn.close()
 
-# --- FUNCIONES DE CATEGORÍAS Y DESTINOS DINÁMICOS ---
 def db_obtener_categorias():
     conn = get_db_connection()
     res = conn.cursor().execute("SELECT nombre FROM categorias ORDER BY nombre").fetchall()
@@ -97,16 +93,14 @@ def db_agregar_categoria(nombre):
     try:
         conn.cursor().execute("INSERT INTO categorias (nombre) VALUES (?)", (nombre.upper(),))
         conn.commit()
-    except sqlite3.IntegrityError:
-        pass 
+    except sqlite3.IntegrityError: pass 
     conn.close()
 
 def db_eliminar_categoria(nombre):
     conn = get_db_connection()
     conn.cursor().execute("DELETE FROM categorias WHERE nombre=?", (nombre,))
     conn.cursor().execute("DELETE FROM productos WHERE categoria=?", (nombre,)) 
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def db_obtener_destinos():
     conn = get_db_connection()
@@ -119,18 +113,15 @@ def db_agregar_destino(nombre):
     try:
         conn.cursor().execute("INSERT INTO destinos (nombre) VALUES (?)", (nombre.upper(),))
         conn.commit()
-    except sqlite3.IntegrityError:
-        pass
+    except sqlite3.IntegrityError: pass
     conn.close()
 
 def db_eliminar_destino(nombre):
     conn = get_db_connection()
     conn.cursor().execute("DELETE FROM destinos WHERE nombre=?", (nombre,))
     conn.cursor().execute("DELETE FROM productos WHERE destino=?", (nombre,)) 
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
-# --- FUNCIONES DE CONFIGURACIÓN Y SEGURIDAD ---
 def db_obtener_tablet_id():
     conn = get_db_connection()
     res = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='tablet_id'").fetchone()
@@ -153,7 +144,19 @@ def db_actualizar_num_mesas(num):
     conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='num_mesas'", (str(num),))
     conn.commit(); conn.close()
 
-# NUEVO: LÓGICA DE LOGO
+def db_obtener_ips():
+    conn = get_db_connection()
+    b = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='ip_barra'").fetchone()
+    c = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='ip_cocina'").fetchone()
+    conn.close()
+    return (b[0] if b else "127.0.0.1", c[0] if c else "127.0.0.1")
+
+def db_actualizar_ips(ip_barra, ip_cocina):
+    conn = get_db_connection()
+    conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='ip_barra'", (ip_barra,))
+    conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='ip_cocina'", (ip_cocina,))
+    conn.commit(); conn.close()
+
 def db_obtener_logo():
     conn = get_db_connection()
     res = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='logo_path'").fetchone()
@@ -176,35 +179,28 @@ def db_actualizar_credenciales(usr, pwd):
     conn = get_db_connection()
     conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='admin_usr'", (usr,))
     conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='admin_pass'", (pwd,))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def db_obtener_mesas_bloqueadas():
     conn = get_db_connection()
     res = conn.cursor().execute("SELECT valor FROM configuracion WHERE clave='mesas_bloqueadas'").fetchone()
     conn.close()
-    if res and res[0]:
-        return [int(x) for x in res[0].split(',')] 
+    if res and res[0]: return [int(x) for x in res[0].split(',')] 
     return []
 
 def db_actualizar_mesas_bloqueadas(lista_mesas):
     conn = get_db_connection()
     valor_texto = ",".join(map(str, lista_mesas)) 
     conn.cursor().execute("UPDATE configuracion SET valor=? WHERE clave='mesas_bloqueadas'", (valor_texto,))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
-# --- FUNCIONES DE PERSISTENCIA ---
 def db_guardar_item_activo(mesa, item):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, cantidad FROM items_activos WHERE mesa_id=? AND nombre=? AND enviado=0", (mesa, item['n']))
     res = cursor.fetchone()
-    if res:
-        cursor.execute("UPDATE items_activos SET cantidad=? WHERE id=?", (item['q'], res[0]))
-    else:
-        cursor.execute("INSERT INTO items_activos (mesa_id, nombre, precio, cantidad, destino, enviado) VALUES (?,?,?,?,?,?)",
-                       (mesa, item['n'], item['p'], item['q'], item['d'], 0))
+    if res: cursor.execute("UPDATE items_activos SET cantidad=? WHERE id=?", (item['q'], res[0]))
+    else: cursor.execute("INSERT INTO items_activos (mesa_id, nombre, precio, cantidad, destino, enviado) VALUES (?,?,?,?,?,?)", (mesa, item['n'], item['p'], item['q'], item['d'], 0))
     conn.commit(); conn.close()
 
 def db_remover_item_activo(mesa, nombre):
@@ -230,8 +226,7 @@ def db_limpiar_mesa(mesa):
 def db_registrar_venta_final(mesa_id, detalle, total, metodo):
     conn = get_db_connection()
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn.cursor().execute("INSERT INTO ventas (mesa_id, detalle, total, fecha, metodo_pago, cerrada) VALUES (?, ?, ?, ?, ?, 0)", 
-                           (mesa_id, detalle, total, ahora, metodo))
+    conn.cursor().execute("INSERT INTO ventas (mesa_id, detalle, total, fecha, metodo_pago, cerrada) VALUES (?, ?, ?, ?, ?, 0)", (mesa_id, detalle, total, ahora, metodo))
     conn.commit(); conn.close()
 
 def db_ejecutar_cierre_caja():
@@ -249,18 +244,15 @@ def db_cargar_estado_inicial():
     conn = get_db_connection()
     filas = conn.cursor().execute("SELECT mesa_id, nombre, precio, cantidad, destino, enviado FROM items_activos").fetchall()
     conn.close()
-    
     datos = {i: [] for i in range(1, num_mesas + 1)}
-    
     for f in filas: 
-        if f[0] not in datos:
-            datos[f[0]] = []
+        if f[0] not in datos: datos[f[0]] = []
         datos[f[0]].append({"n": f[1], "p": f[2], "q": f[3], "d": f[4], "enviado": bool(f[5])})
     return datos
 
 def db_obtener_productos():
     conn = get_db_connection()
-    prods = conn.cursor().execute("SELECT id, nombre, precio, categoria, destino FROM productos").fetchall()
+    prods = conn.cursor().execute("SELECT id, nombre, precio, categoria, destino FROM productos ORDER BY nombre").fetchall()
     conn.close(); return prods
 
 def db_actualizar_precio_producto(id_p, nuevo_p):

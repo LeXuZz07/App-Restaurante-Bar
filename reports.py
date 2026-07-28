@@ -5,9 +5,6 @@ from openpyxl.chart import BarChart, Reference
 from datetime import datetime
 import os
 import database as db
-import matplotlib
-matplotlib.use('Agg') # Esto evita errores de interfaz gráfica en segundo plano
-import matplotlib.pyplot as plt
 
 def generar_excel_cierre(ventas, total, efectivo, tarjeta, tablet_id, productos_vendidos):
     ruta_db = db.get_db_path()
@@ -19,7 +16,6 @@ def generar_excel_cierre(ventas, total, efectivo, tarjeta, tablet_id, productos_
     ws = wb.active
     ws.title = "Corte de Caja"
     
-    # Datos generales
     ws["A1"] = f"CORTE DE CAJA - TABLET {tablet_id}"
     ws["A1"].font = Font(bold=True, size=14)
     ws["A2"] = f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -27,24 +23,20 @@ def generar_excel_cierre(ventas, total, efectivo, tarjeta, tablet_id, productos_
     ws["A5"], ws["B5"] = "EFECTIVO:", efectivo
     ws["A6"], ws["B6"] = "TARJETA:", tarjeta
     
-    # Encabezados en fila 8
     headers = ["Mesa", "Hora", "Método", "Total", "Detalle"]
     for col, text in enumerate(headers, 1):
         ws.cell(row=8, column=col, value=text).font = Font(bold=True)
     
-    # Datos empezando en fila 9 (FORZAMOS POSICIÓN EXACTA)
     for row_idx, v in enumerate(ventas, 9):
         ws.cell(row=row_idx, column=1, value=f"Mesa {v[0]}")
         ws.cell(row=row_idx, column=2, value=v[3])
         ws.cell(row=row_idx, column=3, value=v[4])
         ws.cell(row=row_idx, column=4, value=v[2])
         ws.cell(row=row_idx, column=5, value=v[1])
-        # Ajuste de celda para que no se corte
         ws.cell(row=row_idx, column=5).alignment = Alignment(wrap_text=True, vertical="top")
     
     ws.column_dimensions['E'].width = 50 
     
-    # Hoja de Gráficas
     ws_g = wb.create_sheet("Estadísticas")
     ws_g["A1"], ws_g["B1"] = "Método", "Monto"
     ws_g["A2"], ws_g["B2"] = "Efectivo", efectivo
@@ -84,10 +76,15 @@ def leer_excel(ruta_completa):
         for row in ws.iter_rows(values_only=True):
             filas.append([str(celda) if celda is not None else "" for celda in row])
         return filas
-    except Exception as e:
+    except Exception:
         return None
     
 def generar_graficas_imagenes(total_efe, total_tar, productos_vendidos, ruta_base):
+    # LAZY IMPORT: Carga matplotlib únicamente en el momento que se necesita
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
     # 1. Gráfica de ingresos
     plt.figure(figsize=(6, 4))
     plt.bar(["Efectivo", "Tarjeta"], [total_efe, total_tar], color=['#28a745', '#007bff'])
@@ -97,7 +94,7 @@ def generar_graficas_imagenes(total_efe, total_tar, productos_vendidos, ruta_bas
     plt.savefig(ruta_ingresos)
     plt.close()
     
-    # 2. Gráfica de productos (si hay ventas)
+    # 2. Gráfica de productos
     ruta_productos = None
     if productos_vendidos:
         plt.figure(figsize=(7, 5))

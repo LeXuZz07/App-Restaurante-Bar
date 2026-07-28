@@ -67,6 +67,13 @@ def main(page: ft.Page):
 
     page.clean()
 
+    # --- CACHE DE PRODUCTOS EN RAM (ULTRA RÁPIDO) ---
+    cache_productos = db.db_obtener_productos()
+
+    def recargar_cache_productos():
+        nonlocal cache_productos
+        cache_productos = db.db_obtener_productos()
+
     # Variables para el diálogo de configuración de correo
     txt_conf_email = ft.TextField(label="Correo Electrónico (Gmail)", width=350)
     txt_conf_pass = ft.TextField(label="Contraseña de Aplicación", password=True, width=350)
@@ -173,7 +180,6 @@ def main(page: ft.Page):
     txt_total = ft.Text("TOTAL: $0", size=35, weight="bold", color="green")
     grid_prods = ft.Column(expand=True)
     
-    # --- ESTADO DE CATEGORÍA Y BUSCADOR ---
     categoria_activa = {"nombre": None}
 
     txt_busqueda_producto = ft.TextField(
@@ -223,7 +229,7 @@ def main(page: ft.Page):
                 inicializar_salon() 
                 
                 dlg_logo.open = False
-                page.snack_bar = ft.SnackBar(ft.Text("¡Logo descargado y applied exitosamente!"), bgcolor="green")
+                page.snack_bar = ft.SnackBar(ft.Text("¡Logo descargado y aplicado exitosamente!"), bgcolor="green")
                 page.snack_bar.open = True
                 txt_estado_descarga.value = ""
                 page.update()
@@ -311,6 +317,7 @@ def main(page: ft.Page):
         cat_val = dd_cat.value
         if cat_val:
             db.db_eliminar_categoria(cat_val)
+            recargar_cache_productos()
             opciones = db.db_obtener_categorias()
             dd_cat.options = [ft.dropdown.Option(c) for c in opciones]
             dd_cat.value = opciones[0] if opciones else None
@@ -354,6 +361,7 @@ def main(page: ft.Page):
         dest_val = dd_dest.value
         if dest_val:
             db.db_eliminar_destino(dest_val)
+            recargar_cache_productos()
             opciones = db.db_obtener_destinos()
             dd_dest.options = [ft.dropdown.Option(d) for d in opciones]
             dd_dest.value = opciones[0] if opciones else None
@@ -538,9 +546,6 @@ def main(page: ft.Page):
             page.snack_bar.open = True
             page.update()
 
-    # =======================================================
-    # LÓGICA DEL RECEPTOR DE REPORTES
-    # =======================================================
     def ir_a_login_receptor(e):
         ocultar_todo()
         user_input_receptor.value = ""
@@ -745,9 +750,6 @@ def main(page: ft.Page):
         v_bloqueo_mesas.visible = True
         page.update()
 
-    # =======================================================
-    # LÓGICA DEL PANEL DE ADMINISTRACIÓN DE REPORTES
-    # =======================================================
     def guardar_ip_pc_en_cache(e):
         ruta_ip = os.path.join(os.path.dirname(db.get_db_path()), "ip_pc_config.txt")
         try:
@@ -1067,9 +1069,6 @@ def main(page: ft.Page):
         if any(not i['enviado'] for i in mesa_actual): mostrar_mensaje_central("ADVERTENCIA:\nItems sin enviar a comanda.", "red"); return
         setattr(v_confirmacion, 'visible', True); page.update()
 
-    # =======================================================
-    # FUNCIONES DE PAGO E IMPRESIÓN
-    # =======================================================
     def finalizar_pago_total(metodo):
         m_id = estado["mesa"]; items = cuentas[m_id]; total = sum(i['p']*i['q'] for i in items)
         
@@ -1137,7 +1136,6 @@ def main(page: ft.Page):
 
         total = sum(i['p'] * i['q'] for i in items)
 
-        # Formato ESC/POS para Pre-ticket
         ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== PRE-CUENTA ===\nHOTEL HACIENDA REAL\n" + b'\x1B\x45\x00'
         ticket += "*** NO ES UN TICKET DE PAGO ***\n".encode('ascii', errors='ignore')
         ticket += f"MESA: {m_id}\nFECHA: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n".encode('ascii', errors='ignore')
@@ -1283,13 +1281,13 @@ def main(page: ft.Page):
 
     def refrescar_lista_gestion():
         col_lista_prods.controls.clear()
-        for p in db.db_obtener_productos():
+        for p in cache_productos:
             tf = ft.TextField(value=str(p[2]), width=100, content_padding=ft.padding.symmetric(horizontal=10, vertical=5), text_size=14)
-            col_lista_prods.controls.append(ft.Row([ft.Text(f"{p[1]} ({p[3]})", expand=True), tf, ft.TextButton("ACTUALIZAR", on_click=lambda e, idx=p[0], campo=tf: intentar_actualizar_precio(idx, campo.value)), ft.TextButton("BORRAR", on_click=lambda e, idx=p[0]: [db.db_eliminar_producto(idx), refrescar_lista_gestion()], style=ft.ButtonStyle(color="red"))]))
+            col_lista_prods.controls.append(ft.Row([ft.Text(f"{p[1]} ({p[3]})", expand=True), tf, ft.TextButton("ACTUALIZAR", on_click=lambda e, idx=p[0], campo=tf: intentar_actualizar_precio(idx, campo.value)), ft.TextButton("BORRAR", on_click=lambda e, idx=p[0]: intentar_eliminar_producto(idx), style=ft.ButtonStyle(color="red"))]))
         page.update()
 
     # =======================================================
-    # FILTRADO DINÁMICO DE PRODUCTOS
+    # FILTRADO DINÁMICO OPTIMIZADO (USANDO CACHE DE RAM)
     # =======================================================
     def filtrar_menu_dinamico():
         query = txt_busqueda_producto.value.strip().lower() if txt_busqueda_producto.value else ""
@@ -1301,9 +1299,9 @@ def main(page: ft.Page):
 
         grid_prods.controls.clear()
         grid = ft.GridView(runs_count=3, spacing=10, max_extent=150, expand=True) 
-        todos_prods = db.db_obtener_productos()
 
-        for p in todos_prods:
+        # Filtra directo sobre la lista en memoria RAM (ultra rápido)
+        for p in cache_productos:
             nombre_p = p[1]
             precio_p = p[2]
             cat_p = p[3]
@@ -1338,6 +1336,7 @@ def main(page: ft.Page):
         try: float(txt_pre.value)
         except ValueError: txt_mensaje_error_gestion.value = "El precio debe ser un número válido"; txt_mensaje_error_gestion.color = "red"; page.update(); return
         db.db_agregar_producto(txt_nom.value, txt_pre.value, dd_cat.value, dd_dest.value)
+        recargar_cache_productos()
         txt_nom.value = ""; txt_pre.value = ""; refrescar_lista_gestion()
         txt_mensaje_error_gestion.value = "¡Producto añadido con éxito!"; txt_mensaje_error_gestion.color = "green"; page.update()
 
@@ -1347,9 +1346,15 @@ def main(page: ft.Page):
         try:
             precio_valido = float(valor_texto)
             db.db_actualizar_precio_producto(idx, precio_valido)
+            recargar_cache_productos()
             refrescar_lista_gestion()
             txt_mensaje_error_gestion.value = "¡Precio actualizado!"; txt_mensaje_error_gestion.color = "green"; page.update()
         except ValueError: txt_mensaje_error_gestion.value = "El precio debe ser un número"; txt_mensaje_error_gestion.color = "red"; page.update()
+
+    def intentar_eliminar_producto(idx):
+        db.db_eliminar_producto(idx)
+        recargar_cache_productos()
+        refrescar_lista_gestion()
 
     # ==========================================
     # 3. CONSTRUCCIÓN DE LA INTERFAZ FINAL
@@ -1408,7 +1413,7 @@ def main(page: ft.Page):
 
     v_gestion_menu = ft.Container(content=ft.Column([ft.Row([ft.Text("GESTIONAR PRODUCTOS", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin), txt_mensaje_error_gestion]), ft.Row([txt_nom, txt_pre, dd_cat, col_btns_cat, dd_dest, col_btns_dest, ft.ElevatedButton("AÑADIR", on_click=intentar_agregar_producto, bgcolor="green", color="white", height=62)], vertical_alignment=ft.CrossAxisAlignment.CENTER), ft.Divider(), col_lista_prods]), visible=False, expand=True, padding=30, bgcolor="white")
     
-    v_credenciales = ft.Container(content=ft.Column([ft.Row([ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Column([txt_nuevo_usr, txt_nuevo_pwd, ft.ElevatedButton("GUARDAR CAMBIOS", on_click=guardar_nuevas_credenciales, bgcolor="green", color="white", width=350, height=50), txt_mensaje_credenciales], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), visible=False, expand=True, padding=30, bgcolor="white")
+    v_credenciales = ft.Container(content=ft.Column([ft.Row([ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Column([txt_nuevo_usr, txt_nuevo_pwd, ft.ElevatedButton("GUARDAR CAMBIOS", on_click=guardar_nuevas_credenciales, bgcolor="green", color="white", width=350, height=50), txt_mensaje_credenciales], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
     
     columna_izquierda_reportes = ft.Column([txt_ip_pc, ft.ElevatedButton("GUARDAR IP DESTINO", on_click=guardar_ip_pc_en_cache), ft.Divider(), ft.Text("Lista de Archivos Locales:", weight="bold", size=18), col_lista_archivos], width=320, expand=False)
     columna_derecha_reportes = ft.Column([ft.Row([btn_enviar_pc, btn_exportar_local, btn_eliminar_reporte], alignment="center"), ft.Divider(), contenedor_tabla_excel], expand=True)
@@ -1419,7 +1424,6 @@ def main(page: ft.Page):
     
     v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("Sistema de Restaurante", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.ElevatedButton("RECIBIR CORTES", bgcolor="purple", color="white", on_click=ir_a_login_receptor), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
     
-    # --- BOTÓN DE PRE-TICKET Y BARRA SUPERIOR DE LA VISTA DE PEDIDO ---
     btn_preticket = ft.ElevatedButton(
         "📄 PRE-TICKET", 
         bgcolor="blue", 
