@@ -223,7 +223,7 @@ def main(page: ft.Page):
                 inicializar_salon() 
                 
                 dlg_logo.open = False
-                page.snack_bar = ft.SnackBar(ft.Text("¡Logo descargado y aplicado exitosamente!"), bgcolor="green")
+                page.snack_bar = ft.SnackBar(ft.Text("¡Logo descargado y applied exitosamente!"), bgcolor="green")
                 page.snack_bar.open = True
                 txt_estado_descarga.value = ""
                 page.update()
@@ -915,12 +915,11 @@ def main(page: ft.Page):
         
         switch_llevar.value = False 
         txt_busqueda_producto.value = ""
-        categoria_activa["nombre"] = None  # Resetea la categoría para mostrar mensaje inicial
+        categoria_activa["nombre"] = None
         
         txt_titulo_mesa.value = f"MESA #{estado['mesa']}"
         v_pedido.visible = True
         
-        # Muestra el mensaje de bienvenida inicial como antes
         mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
             
         refrescar_ticket()
@@ -1069,7 +1068,7 @@ def main(page: ft.Page):
         setattr(v_confirmacion, 'visible', True); page.update()
 
     # =======================================================
-    # FUNCIONES DE PAGO
+    # FUNCIONES DE PAGO E IMPRESIÓN
     # =======================================================
     def finalizar_pago_total(metodo):
         m_id = estado["mesa"]; items = cuentas[m_id]; total = sum(i['p']*i['q'] for i in items)
@@ -1125,8 +1124,38 @@ def main(page: ft.Page):
             txt_mixto_error.value = "⚠️ Error en los datos ingresados"; page.update()
 
     # =======================================================
-    # IMPRESIÓN Y REIMPRESIÓN
+    # IMPRESIÓN, REIMPRESIÓN Y PRE-TICKET
     # =======================================================
+    def accion_imprimir_preticket(e):
+        m_id = estado["mesa"]
+        items = cuentas.get(m_id, [])
+        if not items:
+            page.snack_bar = ft.SnackBar(ft.Text("⚠️ No hay consumos en esta mesa para imprimir Pre-Ticket."), bgcolor="orange")
+            page.snack_bar.open = True
+            page.update()
+            return
+
+        total = sum(i['p'] * i['q'] for i in items)
+
+        # Formato ESC/POS para Pre-ticket
+        ticket = b'\x1B\x40' + b'\x1B\x61\x01' + b'\x1B\x45\x01' + b"=== PRE-CUENTA ===\nHOTEL HACIENDA REAL\n" + b'\x1B\x45\x00'
+        ticket += "*** NO ES UN TICKET DE PAGO ***\n".encode('ascii', errors='ignore')
+        ticket += f"MESA: {m_id}\nFECHA: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n".encode('ascii', errors='ignore')
+        ticket += b'\x1B\x61\x00' + ("-" * 32 + "\n").encode('ascii', errors='ignore')
+
+        for it in items:
+            nombre_limpio = limpiar_texto(it['n'])
+            subtotal = it['q'] * it['p']
+            ticket += f"{it['q']}x {nombre_limpio}\n  -> ${subtotal:.2f}\n".encode('ascii', errors='ignore')
+
+        ticket += ("-" * 32 + "\n").encode('ascii', errors='ignore')
+        ticket += b'\x1B\x61\x02' + b'\x1B\x45\x01' + f"TOTAL CONSUMIDO: ${total:.2f}\n".encode('ascii', errors='ignore')
+        ticket += b'\x1B\x45\x00' + b'\x1B\x61\x01' + b"*** CUENTA EN REVISION ***\n" + b'\x0A' * 4 + b'\x1D\x56\x00'
+
+        estado["ticket_bytes"] = ticket
+        dlg_impresora.open = True
+        page.update()
+
     def accion_imprimir_ticket_final(e):
         ticket_data = estado.get("ultimo_ticket", {})
         if not ticket_data:
@@ -1266,7 +1295,6 @@ def main(page: ft.Page):
         query = txt_busqueda_producto.value.strip().lower() if txt_busqueda_producto.value else ""
         cat_actual = categoria_activa["nombre"]
 
-        # Si el buscador está vacío y no hay categoría seleccionada, regresa al mensaje de bienvenida
         if not query and cat_actual is None:
             mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
             return
@@ -1282,12 +1310,10 @@ def main(page: ft.Page):
             dest_p = p[4]
 
             if cat_actual:
-                # Si hay una categoría seleccionada (ej. BEBIDAS), se busca únicamente DENTRO de BEBIDAS
                 coincide_cat = (cat_p == cat_actual)
                 coincide_query = (query in nombre_p.lower()) if query else True
                 mostrar = coincide_cat and coincide_query
             else:
-                # Si no hay categoría seleccionada pero sí se teclea en el buscador, busca globalmente
                 mostrar = (query in nombre_p.lower()) if query else False
 
             if mostrar:
@@ -1393,11 +1419,20 @@ def main(page: ft.Page):
     
     v_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("Sistema de Restaurante", size=30, weight="bold"), ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.ElevatedButton("RECIBIR CORTES", bgcolor="purple", color="white", on_click=ir_a_login_receptor), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
     
-    # --- BARRA SUPERIOR DE LA VISTA DE PEDIDO (VOLVER + BUSCADOR) ---
+    # --- BOTÓN DE PRE-TICKET Y BARRA SUPERIOR DE LA VISTA DE PEDIDO ---
+    btn_preticket = ft.ElevatedButton(
+        "📄 PRE-TICKET", 
+        bgcolor="blue", 
+        color="white", 
+        height=40, 
+        on_click=accion_imprimir_preticket
+    )
+
     row_top_bar_pedido = ft.Row(
         [
             ft.TextButton("<- VOLVER", on_click=ir_a_mesas),
-            ft.Container(content=txt_busqueda_producto, expand=True)
+            ft.Container(content=txt_busqueda_producto, expand=True),
+            btn_preticket
         ],
         alignment=ft.MainAxisAlignment.START,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
