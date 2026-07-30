@@ -1,0 +1,2 @@
+Para restaruante hotel: POS Restaurante Pro
+Para restaurante bar: POS_Restaurante
