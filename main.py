@@ -1,4 +1,5 @@
 import warnings
+# Silenciador de advertencias para Flet 0.80.4
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import flet as ft
@@ -77,7 +78,7 @@ def main(page: ft.Page):
         nonlocal cache_productos
         cache_productos = db.db_obtener_productos()
 
-    # --- NOMBRE DE NEGOCIO DINÁMICO (CORREGIDO) ---
+    # --- NOMBRE DE NEGOCIO DINÁMICO ---
     def al_cambiar_nombre_negocio(e):
         nuevo_val = txt_nombre_negocio.value.strip() or "Sistema de Restaurante"
         db.db_actualizar_nombre_negocio(nuevo_val)
@@ -197,7 +198,20 @@ def main(page: ft.Page):
     switch_llevar = ft.Switch(label="🥡 PARA LLEVAR", value=False, active_color="orange", label_position=ft.LabelPosition.LEFT)
     col_ticket = ft.Column(scroll="always", expand=True)
     txt_total = ft.Text("TOTAL: $0", size=35, weight="bold", color="green")
-    grid_prods = ft.Column(expand=True)
+
+    # --- CONTENEDORES OPTIMIZADOS PARA EL CATÁLOGO DE PRODUCTOS ---
+    grid_prods_view = ft.GridView(runs_count=3, spacing=10, max_extent=150, expand=True)
+    txt_mensaje_central = ft.Text("", size=22, weight="bold", text_align="center")
+    contenedor_mensaje_central = ft.Column(
+        [
+            ft.Container(height=100),
+            ft.Row([txt_mensaje_central], alignment=ft.MainAxisAlignment.CENTER)
+        ],
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        width=700,
+        visible=False
+    )
+    grid_prods = ft.Column([grid_prods_view, contenedor_mensaje_central], expand=True)
     
     categoria_activa = {"nombre": None}
 
@@ -307,7 +321,7 @@ def main(page: ft.Page):
                     on_click=lambda e, cat=c: seleccionar_categoria(cat)
                 )
             )
-        page.update()
+        row_categorias_menu.update()
 
     def guardar_categoria(e):
         if txt_nueva_cat.value:
@@ -406,8 +420,6 @@ def main(page: ft.Page):
         ft.ElevatedButton("+", bgcolor="green", color="white", height=30, width=45, on_click=lambda _: [setattr(txt_nuevo_dest, 'value', ''), setattr(dlg_dest, 'open', True), page.update()]),
         ft.ElevatedButton("-", bgcolor="red", color="white", height=30, width=45, on_click=abrir_borrar_destino)
     ], spacing=2)
-
-    actualizar_botones_categorias_menu()
 
     # =======================================================
     # 1.7 LÓGICA DE NOTAS PARA PRODUCTOS
@@ -520,6 +532,7 @@ def main(page: ft.Page):
         grid_mesas.controls.clear()
         num_mesas = db.db_obtener_num_mesas()
         logo_path = db.db_obtener_logo()
+        tiene_logo = bool(logo_path and os.path.exists(logo_path))
         
         for i in range(1, num_mesas + 1):
             if i not in cuentas: cuentas[i] = [] 
@@ -528,10 +541,19 @@ def main(page: ft.Page):
             elif len(cuentas[i]) > 0: color_fondo = "orange"
                 
             contenido_mesa = [ft.Text(f"{i}", color="white", weight="bold", size=22)]
-            if logo_path and os.path.exists(logo_path):
+            if tiene_logo:
                 contenido_mesa.append(ft.Image(src=logo_path, width=150, height=150, fit="contain"))
                 
-            grid_mesas.controls.append(ft.Container(content=ft.Column(contenido_mesa, alignment="center", horizontal_alignment="center"), bgcolor=color_fondo, border_radius=10, padding=10, on_click=ir_a_pedido, data=i))
+            grid_mesas.controls.append(
+                ft.Container(
+                    content=ft.Column(contenido_mesa, alignment="center", horizontal_alignment="center"), 
+                    bgcolor=color_fondo, 
+                    border_radius=10, 
+                    padding=10, 
+                    on_click=ir_a_pedido, 
+                    data=i
+                )
+            )
 
     def ir_a_mesas(e):
         ocultar_todo()
@@ -761,7 +783,7 @@ def main(page: ft.Page):
             color = "red" if i in mesas_bloqueadas else "green"
             estado_txt = "BLOQUEADA" if i in mesas_bloqueadas else "LIBRE"
             grid_bloqueo.controls.append(ft.Container(content=ft.Column([ft.Text(f"MESA {i}", color="white", weight="bold", size=20), ft.Text(estado_txt, color="white", size=12)], alignment="center", horizontal_alignment="center"), bgcolor=color, border_radius=10, padding=10, on_click=toggle_bloqueo_mesa, data=i))
-        page.update()
+        grid_bloqueo.update()
 
     def ir_a_bloqueo_mesas(e):
         ocultar_todo()
@@ -787,11 +809,9 @@ def main(page: ft.Page):
 
     def seleccionar_reporte_accion(ruta):
         reporte_seleccionado["ruta"] = ruta
-        
         btn_enviar_pc.disabled = False
         btn_exportar_local.disabled = False
         btn_eliminar_reporte.disabled = False
-        
         mostrar_contenido_excel(ruta)
         page.update()
 
@@ -908,36 +928,31 @@ def main(page: ft.Page):
         page.update()
 
     def mostrar_mensaje_central(texto, color_texto):
-        grid_prods.controls.clear()
-        grid_prods.controls.append(
-            ft.Column(
-                [
-                    ft.Container(height=100), 
-                    ft.Row(
-                        [ft.Text(texto, size=22, color=color_texto, weight="bold", text_align="center")], 
-                        alignment=ft.MainAxisAlignment.CENTER
-                    )
-                ], 
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER, 
-                width=700
-            )
-        )
-        page.update()
+        grid_prods_view.visible = False
+        contenedor_mensaje_central.visible = True
+        txt_mensaje_central.value = texto
+        txt_mensaje_central.color = color_texto
+        grid_prods.update()
 
     def refrescar_ticket():
-        col_ticket.controls.clear(); total = 0
+        col_ticket.controls.clear()
+        total = 0.0
         for item in cuentas[estado["mesa"]]:
-            sub = item["p"] * item["q"]; total += sub
+            sub = item["p"] * item["q"]
+            total += sub
             icono = ft.Text(" ✔ ", color="green") if item["enviado"] else ft.TextButton(content=ft.Text(" X ", color="red", weight="bold"), on_click=lambda e, n=item["n"]: quitar_item(n))
             col_ticket.controls.append(ft.Row([icono, ft.Text(f"{item['q']}x {item['n']}", expand=True), ft.Text(f"${sub}")]))
-        txt_total.value = f"TOTAL: ${total}"; page.update()
+        txt_total.value = f"TOTAL: ${total}"
+        col_ticket.update()
+        txt_total.update()
 
     def ir_a_pedido(e):
         m_id = e.control.data
         if m_id in mesas_bloqueadas:
             page.snack_bar = ft.SnackBar(ft.Text(f"Acceso Denegado: La MESA {m_id} está bloqueada.", color="white"), bgcolor="red")
             page.snack_bar.open = True; page.update(); return
-        ocultar_todo(); estado["mesa"] = m_id
+        ocultar_todo()
+        estado["mesa"] = m_id
         
         switch_llevar.value = False 
         txt_busqueda_producto.value = ""
@@ -945,9 +960,7 @@ def main(page: ft.Page):
         
         txt_titulo_mesa.value = f"MESA #{estado['mesa']}"
         v_pedido.visible = True
-        
         mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
-            
         refrescar_ticket()
         page.update()
 
@@ -997,21 +1010,27 @@ def main(page: ft.Page):
         txt_nuevo_usr.value = ""; txt_nuevo_pwd.value = ""
         page.update()
 
+    # --- AGREGAR Y QUITAR ITEMS ULTRA-RÁPIDOS (ESCRITURAS ASÍNCRONAS) ---
     def agregar_item(n, p, d):
-        m = estado["mesa"]; found = False
+        m = estado["mesa"]
+        found = False
         for it in cuentas[m]:
             if it["n"] == n and not it["enviado"]:
-                it["q"] += 1; found = True; db.db_guardar_item_activo(m, it); break
+                it["q"] += 1
+                found = True
+                threading.Thread(target=db.db_guardar_item_activo, args=(m, it), daemon=True).start()
+                break
         if not found:
             nuevo = {"n": n, "p": p, "d": d, "q": 1, "enviado": False}
-            cuentas[m].append(nuevo); db.db_guardar_item_activo(m, nuevo)
+            cuentas[m].append(nuevo)
+            threading.Thread(target=db.db_guardar_item_activo, args=(m, nuevo), daemon=True).start()
         refrescar_ticket()
 
     def quitar_item(nombre):
         m = estado["mesa"]
         for i, it in enumerate(cuentas[m]):
             if it["n"] == nombre and not it["enviado"]:
-                db.db_remover_item_activo(m, nombre)
+                threading.Thread(target=db.db_remover_item_activo, args=(m, nombre), daemon=True).start()
                 if it["q"] > 1: it["q"] -= 1
                 else: cuentas[m].pop(i)
                 break
@@ -1072,11 +1091,7 @@ def main(page: ft.Page):
         items_barra = [i for i in nuevos if i["d"] == "BARRA"]
         items_cocina = [i for i in nuevos if i["d"] == "COCINA"]
         
-        if switch_llevar.value:
-            texto_tipo = "EMPAQUETADO PARA LLEVAR"
-        else:
-            texto_tipo = "PARA COMER AQUI"
-        
+        texto_tipo = "EMPAQUETADO PARA LLEVAR" if switch_llevar.value else "PARA COMER AQUI"
         ip_barra, ip_cocina = db.db_obtener_ips()
         
         if items_barra:
@@ -1320,7 +1335,7 @@ def main(page: ft.Page):
         page.update()
 
     # =======================================================
-    # FILTRADO DINÁMICO OPTIMIZADO
+    # FILTRADO DINÁMICO ULTRA-RÁPIDO (TOP 30 EN RAM)
     # =======================================================
     def filtrar_menu_dinamico():
         query = txt_busqueda_producto.value.strip().lower() if txt_busqueda_producto.value else ""
@@ -1330,8 +1345,9 @@ def main(page: ft.Page):
             mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
             return
 
-        grid_prods.controls.clear()
-        grid = ft.GridView(runs_count=3, spacing=10, max_extent=150, expand=True) 
+        grid_prods_view.controls.clear()
+        MAX_DISPLAY = 30  # Límite óptimo de widgets para fluidez táctil en tablet
+        agregados = 0
 
         for p in cache_productos:
             nombre_p = p[1]
@@ -1347,19 +1363,23 @@ def main(page: ft.Page):
                 mostrar = (query in nombre_p.lower()) if query else False
 
             if mostrar:
-                grid.controls.append(
+                grid_prods_view.controls.append(
                     ft.ElevatedButton(
                         content=ft.Text(f"{nombre_p}\n${precio_p}", text_align="center"),
                         on_click=lambda e, n=nombre_p, pr=precio_p, d=dest_p: abrir_dialogo_nota(n, pr, d),
                         height=80
                     )
                 )
+                agregados += 1
+                if agregados >= MAX_DISPLAY:
+                    break
 
-        if not grid.controls:
+        if not grid_prods_view.controls:
             mostrar_mensaje_central("No se encontraron productos.", "grey")
         else:
-            grid_prods.controls.append(grid)
-            page.update()
+            contenedor_mensaje_central.visible = False
+            grid_prods_view.visible = True
+            grid_prods.update()
 
     def intentar_agregar_producto(e):
         txt_mensaje_error_gestion.value = ""
@@ -1445,7 +1465,7 @@ def main(page: ft.Page):
 
     v_gestion_menu = ft.Container(content=ft.Column([ft.Row([ft.Text("GESTIONAR PRODUCTOS", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin), txt_mensaje_error_gestion]), ft.Row([txt_nom, txt_pre, dd_cat, col_btns_cat, dd_dest, col_btns_dest, ft.ElevatedButton("AÑADIR", on_click=intentar_agregar_producto, bgcolor="green", color="white", height=62)], vertical_alignment=ft.CrossAxisAlignment.CENTER), ft.Divider(), col_lista_prods]), visible=False, expand=True, padding=30, bgcolor="white")
     
-    v_credenciales = ft.Container(content=ft.Column([ft.Row([ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Column([txt_nuevo_usr, txt_nuevo_pwd, ft.ElevatedButton("GUARDAR CAMBIOS", on_click=guardar_nuevas_credenciales, bgcolor="green", color="white", width=350, height=50), txt_mensaje_credenciales], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
+    v_credenciales = ft.Container(content=ft.Column([ft.Row([ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Column([txt_nuevo_usr, txt_nuevo_pwd, ft.ElevatedButton("GUARDAR CAMBIOS", on_click=guardar_nuevas_credenciales, bgcolor="green", color="white", width=350, height=50), txt_mensaje_credenciales], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), visible=False, expand=True, padding=30, bgcolor="white")
     
     columna_izquierda_reportes = ft.Column([txt_ip_pc, ft.ElevatedButton("GUARDAR IP DESTINO", on_click=guardar_ip_pc_en_cache), ft.Divider(), ft.Text("Lista de Archivos Locales:", weight="bold", size=18), col_lista_archivos], width=320, expand=False)
     columna_derecha_reportes = ft.Column([ft.Row([btn_enviar_pc, btn_exportar_local, btn_eliminar_reporte], alignment="center"), ft.Divider(), contenedor_tabla_excel], expand=True)
@@ -1502,7 +1522,7 @@ def main(page: ft.Page):
         bgcolor="white"
     )
     
-    v_confirmacion = ft.Container(content=ft.Row([ft.Column([ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"), ft.Row([ft.ElevatedButton("SÍ, PAGAR", bgcolor="green", color="white", on_click=lambda _: [col_resumen_final.controls.clear(), [col_resumen_final.controls.append(ft.Text(f"{i['q']}x {i['n']} ... ${i['p']*i['q']}")) for i in cuentas[estado['mesa']]], setattr(v_ticket_final, 'visible', True), setattr(v_confirmacion, 'visible', False), setattr(columna_botones_acciones, 'visible', False), page.update()], width=180, height=60), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirmacion, 'visible', False), page.update()], width=180, height=60)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="rgba(255,255,255,0.9)")
+    v_confirmacion = ft.Container(content=ft.Row([ft.Column([ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"), ft.Row([ft.ElevatedButton("SÍ, PAGAR", bgcolor="green", color="white", on_click=lambda _: [col_resumen_final.controls.clear(), [col_resumen_final.controls.append(ft.Text(f"{i['q']}x {i['n']} ... ${i['p']*i['q']}")) for i in cuentas[estado['mesa']]], setattr(v_ticket_final, 'visible', True), setattr(v_confirmacion, 'visible', False), setattr(columna_botones_acciones, 'visible', False), page.update()], width=180, height=60), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirmacion, 'visible', False), page.update()], width=180, height=60)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="rgba(255,255,255,0.95)")
     
     col_resumen_final = ft.Column(scroll="always", expand=True)
 
@@ -1537,6 +1557,9 @@ def main(page: ft.Page):
         v_confirm_cierre, v_resumen_cierre, v_pago_metodo, v_pago_mixto, v_pago_finalizado, 
         v_gestion_menu, v_credenciales, v_visor_reportes, v_bloqueo_mesas, v_modo_receptor, v_estadisticas
     ], expand=True))
+    
+    # Carga inicial optimizada
+    actualizar_botones_categorias_menu()
     ir_a_mesas(None)
 
 if __name__ == "__main__":
