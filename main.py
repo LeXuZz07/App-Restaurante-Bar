@@ -1,5 +1,4 @@
 import warnings
-# Silenciador de advertencias para Flet 0.80.4
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import flet as ft
@@ -8,7 +7,6 @@ import os
 import urllib.request
 import socket
 import unicodedata
-import shutil  
 import threading 
 import database as db
 import reports as rp
@@ -159,20 +157,10 @@ def main(page: ft.Page):
     txt_mensaje_credenciales = ft.Text("", size=18, weight="bold", text_align="center")
     user_input_bloqueo = ft.TextField(label="Usuario Admin", width=350)
     pass_input_bloqueo = ft.TextField(label="Contraseña", password=True, width=350)
-    
-    user_input_receptor = ft.TextField(label="Usuario Admin", width=350)
-    pass_input_receptor = ft.TextField(label="Contraseña", password=True, width=350)
-    estado_servidor = {"activo": False, "socket": None}
-    txt_estado_servidor = ft.Text("ESTADO: APAGADO", color="red", weight="bold", size=22)
-    log_servidor = ft.Column(scroll="always", expand=True)
 
     reporte_seleccionado = {"ruta": None}
     col_lista_archivos = ft.Column(scroll="always", expand=1)
     contenedor_tabla_excel = ft.Column(scroll="always", expand=True)
-    
-    txt_ip_pc = ft.TextField(label="IP PC (Destino Excel)", width=250)
-    btn_enviar_pc = ft.ElevatedButton("📤 ENVIAR A PC", disabled=True, bgcolor="blue", color="white", height=45)
-    btn_exportar_local = ft.ElevatedButton("📥 EXPORTAR LOCAL", disabled=True, bgcolor="green", color="white", height=45)
     btn_eliminar_reporte = ft.ElevatedButton("🗑️ ELIMINAR", disabled=True, bgcolor="red", color="white", height=45)
 
     grid_mesas = ft.GridView(expand=True, runs_count=5, spacing=15)
@@ -199,7 +187,6 @@ def main(page: ft.Page):
     col_ticket = ft.Column(scroll="always", expand=True)
     txt_total = ft.Text("TOTAL: $0", size=35, weight="bold", color="green")
 
-    # --- CONTENEDORES OPTIMIZADOS PARA EL CATÁLOGO DE PRODUCTOS ---
     grid_prods_view = ft.GridView(runs_count=3, spacing=10, max_extent=150, expand=True)
     txt_mensaje_central = ft.Text("", size=22, weight="bold", text_align="center")
     contenedor_mensaje_central = ft.Column(
@@ -232,8 +219,43 @@ def main(page: ft.Page):
 
     v_login = v_admin = v_gestion_menu = v_credenciales = v_visor_reportes = v_bloqueo_mesas = v_login_bloqueo = None
     v_mesas = v_pedido = v_confirmacion = v_ticket_final = v_pago_metodo = v_pago_finalizado = v_confirm_cierre = v_resumen_cierre = None
-    v_pago_mixto = v_login_receptor = v_modo_receptor = v_estadisticas = None 
+    v_pago_mixto = v_estadisticas = None 
     columna_botones_acciones = None
+
+    # =======================================================
+    # 1.2 MOTOR DE NAVEGACIÓN DINÁMICO (PROTEGIDO)
+    # =======================================================
+    contenedor_principal = ft.Container(expand=True)
+    contenedor_modal = ft.Container(visible=False, expand=True)
+
+    def safe_update(ctrl):
+        """Actualiza un control sin lanzar excepción si no está montado en la página."""
+        if not ctrl:
+            return
+        try:
+            ctrl.update()
+        except Exception:
+            pass
+
+    def cambiar_vista(vista):
+        cerrar_modal(actualizar=False)
+        vista.visible = True
+        contenedor_principal.content = vista
+        if columna_botones_acciones:
+            columna_botones_acciones.visible = True
+        page.update()
+
+    def abrir_modal(vista_modal):
+        vista_modal.visible = True
+        contenedor_modal.content = vista_modal
+        contenedor_modal.visible = True
+        safe_update(contenedor_modal)
+
+    def cerrar_modal(actualizar=True):
+        contenedor_modal.visible = False
+        contenedor_modal.content = None
+        if actualizar:
+            safe_update(contenedor_modal)
 
     # =======================================================
     # 1.5 LÓGICA DE CARGA DE LOGO
@@ -309,7 +331,7 @@ def main(page: ft.Page):
     def seleccionar_categoria(cat):
         categoria_activa["nombre"] = cat
         txt_busqueda_producto.value = ""
-        txt_busqueda_producto.update()
+        safe_update(txt_busqueda_producto)
         filtrar_menu_dinamico()
 
     def actualizar_botones_categorias_menu():
@@ -321,7 +343,7 @@ def main(page: ft.Page):
                     on_click=lambda e, cat=c: seleccionar_categoria(cat)
                 )
             )
-        row_categorias_menu.update()
+        safe_update(row_categorias_menu)
 
     def guardar_categoria(e):
         if txt_nueva_cat.value:
@@ -504,30 +526,8 @@ def main(page: ft.Page):
     )
 
     # ==========================================
-    # 2. DEFINICIÓN DE FUNCIONES
+    # 2. DEFINICIÓN DE CONTROLADORES
     # ==========================================
-    def ocultar_todo():
-        if v_mesas: v_mesas.visible = False
-        if v_pedido: v_pedido.visible = False
-        if v_login: v_login.visible = False
-        if v_login_bloqueo: v_login_bloqueo.visible = False
-        if v_login_receptor: v_login_receptor.visible = False
-        if v_modo_receptor: v_modo_receptor.visible = False
-        if v_admin: v_admin.visible = False
-        if v_confirmacion: v_confirmacion.visible = False
-        if v_ticket_final: v_ticket_final.visible = False
-        if v_confirm_cierre: v_confirm_cierre.visible = False
-        if v_resumen_cierre: v_resumen_cierre.visible = False
-        if v_pago_metodo: v_pago_metodo.visible = False
-        if v_pago_finalizado: v_pago_finalizado.visible = False
-        if v_gestion_menu: v_gestion_menu.visible = False
-        if v_credenciales: v_credenciales.visible = False
-        if v_visor_reportes: v_visor_reportes.visible = False 
-        if v_bloqueo_mesas: v_bloqueo_mesas.visible = False
-        if v_pago_mixto: v_pago_mixto.visible = False
-        if v_estadisticas: v_estadisticas.visible = False
-        if columna_botones_acciones: columna_botones_acciones.visible = True
-
     def inicializar_salon():
         grid_mesas.controls.clear()
         num_mesas = db.db_obtener_num_mesas()
@@ -556,16 +556,13 @@ def main(page: ft.Page):
             )
 
     def ir_a_mesas(e):
-        ocultar_todo()
         user_input.value = ""; pass_input.value = ""
         user_input_bloqueo.value = ""; pass_input_bloqueo.value = ""
-        user_input_receptor.value = ""; pass_input_receptor.value = ""
         txt_busqueda_producto.value = ""
         categoria_activa["nombre"] = None
         txt_nombre_negocio.value = db.db_obtener_nombre_negocio()
-        v_mesas.visible = True
         inicializar_salon()
-        page.update()
+        cambiar_vista(v_mesas)
 
     def intentar_login(e):
         usr_bd, pwd_bd = db.db_obtener_credenciales()
@@ -577,11 +574,9 @@ def main(page: ft.Page):
             page.update()
 
     def ir_a_login_bloqueo(e):
-        ocultar_todo()
         user_input_bloqueo.value = ""
         pass_input_bloqueo.value = ""
-        v_login_bloqueo.visible = True
-        page.update()
+        cambiar_vista(v_login_bloqueo)
 
     def intentar_login_bloqueo(e):
         usr_bd, pwd_bd = db.db_obtener_credenciales()
@@ -592,124 +587,23 @@ def main(page: ft.Page):
             page.snack_bar.open = True
             page.update()
 
-    def ir_a_login_receptor(e):
-        ocultar_todo()
-        user_input_receptor.value = ""
-        pass_input_receptor.value = ""
-        v_login_receptor.visible = True
-        page.update()
-
-    def intentar_login_receptor(e):
-        usr_bd, pwd_bd = db.db_obtener_credenciales()
-        if user_input_receptor.value == usr_bd and pass_input_receptor.value == pwd_bd:
-            ocultar_todo()
-            v_modo_receptor.visible = True
-            page.update()
-        else:
-            page.snack_bar = ft.SnackBar(ft.Text("Usuario o contraseña incorrectos"), bgcolor="red")
-            page.snack_bar.open = True
-            page.update()
-
-    def servidor_worker():
-        puerto = 9102
-        carpeta_destino = os.path.join(os.path.dirname(db.get_db_path()), "Reportes_Cierre")
-        os.makedirs(carpeta_destino, exist_ok=True)
-
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
-            s.bind(('0.0.0.0', puerto))
-            s.listen(5)
-            estado_servidor["socket"] = s
-
-            txt_estado_servidor.value = f"ESTADO: ESCUCHANDO EN PUERTO {puerto}"
-            txt_estado_servidor.color = "green"
-            log_servidor.controls.append(ft.Text(f"[*] Servidor encendido. Los archivos entrarán a la bóveda interna de la app.", color="blue", italic=True))
-            page.update()
-
-            while estado_servidor["activo"]:
-                s.settimeout(2.0) 
-                try:
-                    conn, addr = s.accept()
-                except socket.timeout:
-                    continue
-                except Exception:
-                    break 
-
-                log_servidor.controls.append(ft.Text(f"[+] Conexión entrante detectada desde: {addr[0]}", color="orange"))
-                page.update()
-
-                try:
-                    nombre_archivo = conn.recv(1024).decode('utf-8')
-                    if nombre_archivo:
-                        conn.send(b"OK")
-                        ruta_guardado = os.path.join(carpeta_destino, nombre_archivo)
-                        with open(ruta_guardado, 'wb') as f:
-                            while True:
-                                bytes_leidos = conn.recv(4096)
-                                if not bytes_leidos: break
-                                f.write(bytes_leidos)
-                        log_servidor.controls.append(ft.Text(f"[✔] EXCEL RECIBIDO Y GUARDADO: {nombre_archivo}", color="green", weight="bold"))
-                        page.update()
-                except Exception as ex:
-                    log_servidor.controls.append(ft.Text(f"[x] Error al recibir el archivo: {ex}", color="red"))
-                    page.update()
-                finally:
-                    conn.close()
-
-        except Exception as e:
-            log_servidor.controls.append(ft.Text(f"Error fatal del servidor: {e}", color="red"))
-            page.update()
-        finally:
-            if estado_servidor["socket"]:
-                try: estado_servidor["socket"].close()
-                except: pass
-            txt_estado_servidor.value = "ESTADO: APAGADO"
-            txt_estado_servidor.color = "red"
-            btn_toggle_servidor.text = "▶ INICIAR RECEPCIÓN"
-            btn_toggle_servidor.bgcolor = "green"
-            page.update()
-
-    def toggle_servidor(e):
-        if not estado_servidor["activo"]:
-            estado_servidor["activo"] = True
-            btn_toggle_servidor.text = "⏹ DETENER RECEPCIÓN"
-            btn_toggle_servidor.bgcolor = "red"
-            page.update()
-            threading.Thread(target=servidor_worker, daemon=True).start()
-        else:
-            estado_servidor["activo"] = False
-            log_servidor.controls.append(ft.Text("[*] Apagando servidor...", color="red"))
-            page.update()
-
-    btn_toggle_servidor = ft.ElevatedButton("▶ INICIAR RECEPCIÓN", bgcolor="green", color="white", height=60, width=300, on_click=toggle_servidor)
-
     def ir_a_admin(e):
-        ocultar_todo()
         txt_config_tablet_id.value = db.db_obtener_tablet_id()
-        v_admin.visible = True
         actualizar_reporte_admin()
-        page.update()
+        cambiar_vista(v_admin)
 
     def ir_a_gestion_menu(e):
-        ocultar_todo()
         txt_mensaje_error_gestion.value = "" 
-        v_gestion_menu.visible = True
         refrescar_lista_gestion()
-        page.update()
+        cambiar_vista(v_gestion_menu)
 
     def ir_a_credenciales(e):
-        ocultar_todo()
         txt_nuevo_usr.value = ""; txt_nuevo_pwd.value = ""; txt_mensaje_credenciales.value = ""
-        v_credenciales.visible = True
-        page.update()
+        cambiar_vista(v_credenciales)
 
     def ir_a_estadisticas(e):
-        ocultar_todo()
         ventas = db.db_obtener_ventas_activas()
-        
-        efe = 0.0
-        tar = 0.0
+        efe = 0.0; tar = 0.0
         productos_vendidos = {}
         
         for v in ventas:
@@ -732,12 +626,11 @@ def main(page: ft.Page):
                     except: pass
                     
         total_ingresos = efe + tar
-        
         col_grafica_dinero.controls.clear()
+        
         if total_ingresos > 0:
             p_efe = efe/total_ingresos
             p_tar = tar/total_ingresos
-            
             col_grafica_dinero.controls.extend([
                 ft.Text("🟢 Efectivo", weight="bold"),
                 ft.ProgressBar(value=p_efe, color="green", bgcolor="black12", height=20),
@@ -766,8 +659,7 @@ def main(page: ft.Page):
         else:
             col_lista_top.controls.append(ft.Text("No hay productos vendidos.", color="grey"))
             
-        v_estadisticas.visible = True
-        page.update()
+        cambiar_vista(v_estadisticas)
 
     def toggle_bloqueo_mesa(e):
         m_id = e.control.data
@@ -783,87 +675,20 @@ def main(page: ft.Page):
             color = "red" if i in mesas_bloqueadas else "green"
             estado_txt = "BLOQUEADA" if i in mesas_bloqueadas else "LIBRE"
             grid_bloqueo.controls.append(ft.Container(content=ft.Column([ft.Text(f"MESA {i}", color="white", weight="bold", size=20), ft.Text(estado_txt, color="white", size=12)], alignment="center", horizontal_alignment="center"), bgcolor=color, border_radius=10, padding=10, on_click=toggle_bloqueo_mesa, data=i))
-        grid_bloqueo.update()
+        safe_update(grid_bloqueo)
 
     def ir_a_bloqueo_mesas(e):
-        ocultar_todo()
         txt_config_num_mesas.value = str(db.db_obtener_num_mesas())
         ips = db.db_obtener_ips()
         txt_ip_barra.value = ips[0]
         txt_ip_cocina.value = ips[1]
-        
         refrescar_grid_bloqueo()
-        v_bloqueo_mesas.visible = True
-        page.update()
-
-    def guardar_ip_pc_en_cache(e):
-        ruta_ip = os.path.join(os.path.dirname(db.get_db_path()), "ip_pc_config.txt")
-        try:
-            with open(ruta_ip, "w") as f:
-                f.write(txt_ip_pc.value.strip())
-            page.snack_bar = ft.SnackBar(ft.Text("¡IP de la computadora guardada!"), bgcolor="green")
-        except Exception as ex:
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error al guardar IP: {ex}"), bgcolor="red")
-        page.snack_bar.open = True
-        page.update()
+        cambiar_vista(v_bloqueo_mesas)
 
     def seleccionar_reporte_accion(ruta):
         reporte_seleccionado["ruta"] = ruta
-        btn_enviar_pc.disabled = False
-        btn_exportar_local.disabled = False
         btn_eliminar_reporte.disabled = False
         mostrar_contenido_excel(ruta)
-        page.update()
-
-    def enviar_excel_red(ruta_excel, ip_destino):
-        try:
-            nombre_archivo = os.path.basename(ruta_excel)
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(5.0)
-            s.connect((ip_destino, 9102)) 
-            
-            s.send(nombre_archivo.encode('utf-8'))
-            respuesta = s.recv(1024)
-            if respuesta == b"OK":
-                with open(ruta_excel, 'rb') as f:
-                    while True:
-                        bytes_leidos = f.read(4096)
-                        if not bytes_leidos: break
-                        s.sendall(bytes_leidos)
-            s.close()
-            return True, "Reporte enviado exitosamente a la PC/Tablet."
-        except Exception as e:
-            return False, f"Error de red: {e}"
-
-    def accion_boton_enviar_pc(e):
-        ip = txt_ip_pc.value.strip()
-        if not ip:
-            page.snack_bar = ft.SnackBar(ft.Text("Primero debes guardar la IP destino."), bgcolor="red")
-        else:
-            exito, mensaje = enviar_excel_red(reporte_seleccionado["ruta"], ip)
-            color_bg = "green" if exito else "red"
-            page.snack_bar = ft.SnackBar(ft.Text(mensaje), bgcolor=color_bg)
-        page.snack_bar.open = True
-        page.update()
-
-    def accion_boton_exportar_local(e):
-        try:
-            ruta_origen = reporte_seleccionado["ruta"]
-            nombre_archivo = os.path.basename(ruta_origen)
-            
-            carpeta_descargas = "/storage/emulated/0/Download"
-            if not os.path.exists(carpeta_descargas): 
-                carpeta_descargas = os.path.expanduser("~/Downloads")
-                
-            os.makedirs(carpeta_descargas, exist_ok=True)
-            ruta_destino = os.path.join(carpeta_descargas, nombre_archivo)
-            
-            shutil.copy(ruta_origen, ruta_destino)
-            page.snack_bar = ft.SnackBar(ft.Text(f"Archivo copiado a: {carpeta_descargas}"), bgcolor="green")
-        except Exception as ex:
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error al exportar: {ex}"), bgcolor="red")
-        
-        page.snack_bar.open = True
         page.update()
 
     def accion_boton_eliminar_reporte(e):
@@ -876,14 +701,13 @@ def main(page: ft.Page):
         page.snack_bar.open = True
         page.update()
 
-    btn_enviar_pc.on_click = accion_boton_enviar_pc
-    btn_exportar_local.on_click = accion_boton_exportar_local
     btn_eliminar_reporte.on_click = accion_boton_eliminar_reporte
 
     def mostrar_contenido_excel(ruta):
         datos = rp.leer_excel(ruta)
         contenedor_tabla_excel.controls.clear()
-        if not datos: contenedor_tabla_excel.controls.append(ft.Text("⚠️ Error al leer el archivo o archivo vacío.", color="red"))
+        if not datos: 
+            contenedor_tabla_excel.controls.append(ft.Text("⚠️ Error al leer el archivo o archivo vacío.", color="red"))
         else:
             max_cols = len(datos[0]) if datos else 5
             columnas = [ft.DataColumn(ft.Text(f"Col {i+1}", weight="bold")) for i in range(max_cols)]
@@ -896,19 +720,8 @@ def main(page: ft.Page):
         page.update()
 
     def ir_a_visor_reportes(e):
-        ocultar_todo()
-        btn_enviar_pc.disabled = True
-        btn_exportar_local.disabled = True
         btn_eliminar_reporte.disabled = True
         reporte_seleccionado["ruta"] = None
-        
-        ruta_ip = os.path.join(os.path.dirname(db.get_db_path()), "ip_pc_config.txt")
-        if os.path.exists(ruta_ip):
-            with open(ruta_ip, "r") as f:
-                txt_ip_pc.value = f.read().strip()
-        else:
-            txt_ip_pc.value = ""
-        
         col_lista_archivos.controls.clear()
         contenedor_tabla_excel.controls.clear()
         contenedor_tabla_excel.controls.append(ft.Text("Selecciona un reporte de la lista para gestionarlo.", color="grey", size=18))
@@ -920,19 +733,20 @@ def main(page: ft.Page):
             archivos.sort(reverse=True)
             if archivos:
                 for arch in archivos: 
-                    col_lista_archivos.controls.append(ft.ElevatedButton(arch, on_click=lambda e, r=os.path.join(ruta_reportes, arch): seleccionar_reporte_accion(r), width=300))
-            else: col_lista_archivos.controls.append(ft.Text("No hay reportes generados."))
-        else: col_lista_archivos.controls.append(ft.Text("Carpeta no encontrada."))
+                    col_lista_archivos.controls.append(ft.ElevatedButton(arch, on_click=lambda e, r=os.path.join(ruta_reportes, arch): seleccionar_reporte_accion(r), width=280))
+            else: 
+                col_lista_archivos.controls.append(ft.Text("No hay reportes generados."))
+        else: 
+            col_lista_archivos.controls.append(ft.Text("Carpeta no encontrada."))
         
-        v_visor_reportes.visible = True
-        page.update()
+        cambiar_vista(v_visor_reportes)
 
     def mostrar_mensaje_central(texto, color_texto):
         grid_prods_view.visible = False
         contenedor_mensaje_central.visible = True
         txt_mensaje_central.value = texto
         txt_mensaje_central.color = color_texto
-        grid_prods.update()
+        safe_update(grid_prods)
 
     def refrescar_ticket():
         col_ticket.controls.clear()
@@ -943,26 +757,24 @@ def main(page: ft.Page):
             icono = ft.Text(" ✔ ", color="green") if item["enviado"] else ft.TextButton(content=ft.Text(" X ", color="red", weight="bold"), on_click=lambda e, n=item["n"]: quitar_item(n))
             col_ticket.controls.append(ft.Row([icono, ft.Text(f"{item['q']}x {item['n']}", expand=True), ft.Text(f"${sub}")]))
         txt_total.value = f"TOTAL: ${total}"
-        col_ticket.update()
-        txt_total.update()
+        safe_update(col_ticket)
+        safe_update(txt_total)
 
     def ir_a_pedido(e):
         m_id = e.control.data
         if m_id in mesas_bloqueadas:
             page.snack_bar = ft.SnackBar(ft.Text(f"Acceso Denegado: La MESA {m_id} está bloqueada.", color="white"), bgcolor="red")
             page.snack_bar.open = True; page.update(); return
-        ocultar_todo()
+            
         estado["mesa"] = m_id
-        
         switch_llevar.value = False 
         txt_busqueda_producto.value = ""
         categoria_activa["nombre"] = None
-        
         txt_titulo_mesa.value = f"MESA #{estado['mesa']}"
-        v_pedido.visible = True
+        
+        cambiar_vista(v_pedido)
         mostrar_mensaje_central("¡Bienvenido!\nSelecciona productos.", "blue")
         refrescar_ticket()
-        page.update()
 
     def validar_y_guardar_id(e):
         valor = txt_config_tablet_id.value
@@ -1010,7 +822,7 @@ def main(page: ft.Page):
         txt_nuevo_usr.value = ""; txt_nuevo_pwd.value = ""
         page.update()
 
-    # --- AGREGAR Y QUITAR ITEMS ULTRA-RÁPIDOS (ESCRITURAS ASÍNCRONAS) ---
+    # --- AGREGAR Y QUITAR ITEMS ULTRA-RÁPIDOS ---
     def agregar_item(n, p, d):
         m = estado["mesa"]
         found = False
@@ -1108,7 +920,7 @@ def main(page: ft.Page):
         mesa_actual = cuentas[estado["mesa"]]
         if not mesa_actual: mostrar_mensaje_central("ERROR:\nLa cuenta está vacía.", "red"); return
         if any(not i['enviado'] for i in mesa_actual): mostrar_mensaje_central("ADVERTENCIA:\nItems sin enviar a comanda.", "red"); return
-        setattr(v_confirmacion, 'visible', True); page.update()
+        abrir_modal(v_confirmacion)
 
     def finalizar_pago_total(metodo):
         m_id = estado["mesa"]; items = cuentas[m_id]; total = sum(i['p']*i['q'] for i in items)
@@ -1118,7 +930,8 @@ def main(page: ft.Page):
         
         db.db_registrar_venta_final(m_id, detalle_ticket, total, metodo)
         db.db_limpiar_mesa(m_id); cuentas[m_id] = []
-        ocultar_todo(); txt_mensaje_despedida.value = f"¡PAGO REGISTRADO!\nMétodo: {metodo.upper()}"; v_pago_finalizado.visible = True; page.update()
+        txt_mensaje_despedida.value = f"¡PAGO REGISTRADO!\nMétodo: {metodo.upper()}"
+        cambiar_vista(v_pago_finalizado)
 
     def actualizar_tarjeta_mixto(e):
         try:
@@ -1134,12 +947,11 @@ def main(page: ft.Page):
     txt_mixto_efectivo.on_change = actualizar_tarjeta_mixto
 
     def ir_a_pago_mixto(e):
-        ocultar_todo()
         m_id = estado["mesa"]
         total = sum(i['p']*i['q'] for i in cuentas[m_id])
         txt_mixto_total.value = f"TOTAL A PAGAR: ${total}"
         txt_mixto_efectivo.value = ""; txt_mixto_tarjeta.value = str(total); txt_mixto_error.value = ""
-        v_pago_mixto.visible = True; page.update()
+        cambiar_vista(v_pago_mixto)
 
     def confirmar_pago_mixto(e):
         try:
@@ -1157,14 +969,13 @@ def main(page: ft.Page):
             
             db.db_registrar_venta_final(m_id, detalle_ticket, total, metodo_string)
             db.db_limpiar_mesa(m_id); cuentas[m_id] = []
-            ocultar_todo()
             txt_mensaje_despedida.value = f"¡PAGO REGISTRADO!\nMixto (Efe: ${efe} | Tar: ${tar})"
-            v_pago_finalizado.visible = True; page.update()
+            cambiar_vista(v_pago_finalizado)
         except Exception:
             txt_mixto_error.value = "⚠️ Error en los datos ingresados"; page.update()
 
     # =======================================================
-    # IMPRESIÓN, REIMPRESIÓN Y PRE-TICKET (CON NOMBRE DINÁMICO)
+    # IMPRESIÓN, REIMPRESIÓN Y PRE-TICKET
     # =======================================================
     def accion_imprimir_preticket(e):
         m_id = estado["mesa"]
@@ -1242,26 +1053,20 @@ def main(page: ft.Page):
         page.update()
 
     def ejecutar_cierre_final(e):
-        if not v_confirm_cierre.visible:
-            return
-
-        v_confirm_cierre.visible = False
-        page.update()
+        cerrar_modal()
 
         try:
             config = mailer.cargar_configuracion()
             if not config or not config.get("EMAIL_REMITENTE") or not config.get("EMAIL_PASSWORD"):
                 dlg_alerta_config.open = True
-                v_confirm_cierre.visible = True
-                page.update()
+                abrir_modal(v_confirm_cierre)
                 return 
 
             ventas = db.db_obtener_ventas_activas()
             if not ventas:
                 page.snack_bar = ft.SnackBar(ft.Text("⚠️ No hay ventas para cerrar."), bgcolor="orange")
                 page.snack_bar.open = True
-                v_confirm_cierre.visible = True
-                page.update()
+                abrir_modal(v_confirm_cierre)
                 return
 
             total_caja = sum(v[2] for v in ventas); efe = 0.0; tar = 0.0
@@ -1294,20 +1099,19 @@ def main(page: ft.Page):
             
             if exito:
                 db.db_ejecutar_cierre_caja() 
-                
                 txt_resumen_cierre_total.value = f"INGRESO TOTAL: ${total_caja}"
                 txt_resumen_efectivo.value = f"EFECTIVO: ${efe}"
                 txt_resumen_tarjeta.value = f"TARJETA: ${tar}"
                 txt_resumen_cierre_fecha.value = f"FECHA Y HORA: {datetime.now()}"
                 
-                v_resumen_cierre.visible = True
+                cambiar_vista(v_resumen_cierre)
                 page.snack_bar = ft.SnackBar(ft.Text("✅ Reporte enviado y cierre completado."), bgcolor="green")
             else:
-                v_confirm_cierre.visible = True 
+                abrir_modal(v_confirm_cierre)
                 page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al enviar: {mensaje}. Intenta de nuevo."), bgcolor="red")
             
         except Exception as ex:
-            v_confirm_cierre.visible = True
+            abrir_modal(v_confirm_cierre)
             page.snack_bar = ft.SnackBar(ft.Text(f"Error crítico: {str(ex)}"), bgcolor="red")
         
         page.snack_bar.open = True
@@ -1323,8 +1127,8 @@ def main(page: ft.Page):
             else: texto_metodo = f"PAGO: {metodo.upper()}"
             
             btn_reimprimir = ft.ElevatedButton("🖨️ REIMPRIMIR", bgcolor="grey", color="white", on_click=lambda e, m=v[0], d=v[1], t=v[2], f=v[3], met=texto_metodo: accion_reimprimir_ticket(m, d, t, f, met))
-
             col_reportes_dia.controls.append(ft.Container(content=ft.Column([ft.Row([ft.Text(f"MESA {v[0]}", weight="bold", size=18), ft.Text(texto_metodo, color="blue", weight="bold")], alignment="spaceBetween"), ft.Text("Productos:", weight="bold"), ft.Text(v[1], italic=True, color="grey"), ft.Row([ft.Text(f"Total: ${v[2]}", color="green", weight="bold"), ft.Text(f"Hora: {v[3]}", size=12)], alignment="spaceBetween"), ft.Divider(), ft.Row([btn_reimprimir], alignment="end")]), padding=15, border=ft.border.all(1, "grey"), border_radius=10, margin=ft.margin.only(bottom=10)))
+            
         txt_ingreso_total_dia.value = f"TOTAL EN CAJA: ${sum(x[2] for x in ventas)}"; page.update()
 
     def refrescar_lista_gestion():
@@ -1346,7 +1150,7 @@ def main(page: ft.Page):
             return
 
         grid_prods_view.controls.clear()
-        MAX_DISPLAY = 30  # Límite óptimo de widgets para fluidez táctil en tablet
+        MAX_DISPLAY = 30
         agregados = 0
 
         for p in cache_productos:
@@ -1379,7 +1183,7 @@ def main(page: ft.Page):
         else:
             contenedor_mensaje_central.visible = False
             grid_prods_view.visible = True
-            grid_prods.update()
+            safe_update(grid_prods)
 
     def intentar_agregar_producto(e):
         txt_mensaje_error_gestion.value = ""
@@ -1409,7 +1213,7 @@ def main(page: ft.Page):
         refrescar_lista_gestion()
 
     # ==========================================
-    # 3. CONSTRUCCIÓN DE LA INTERFAZ FINAL
+    # 3. CONSTRUCCIÓN DE VISTAS INDEPENDIENTES
     # ==========================================
     inicializar_salon() 
 
@@ -1420,13 +1224,29 @@ def main(page: ft.Page):
     
     page.overlay.extend([dlg_cat, dlg_dest, dlg_borrar_cat, dlg_borrar_dest, dlg_logo, dlg_nota, dlg_impresora, dlg_config_correo])
 
-    v_login = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO ADMIN", size=40, weight="bold"), user_input, pass_input, ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=intentar_login), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
+    v_login = ft.Container(
+        content=ft.Row([
+            ft.Column([
+                ft.Text("ACCESO ADMIN", size=40, weight="bold"), 
+                user_input, pass_input, 
+                ft.ElevatedButton("ENTRAR", bgcolor="blue", color="white", width=350, height=50, on_click=intentar_login), 
+                ft.TextButton("VOLVER", on_click=ir_a_mesas)
+            ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+        ], alignment=ft.MainAxisAlignment.CENTER), 
+        expand=True, bgcolor="white"
+    )
     
-    v_login_bloqueo = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO A CONFIGURACIÓN", size=40, weight="bold"), user_input_bloqueo, pass_input_bloqueo, ft.ElevatedButton("ENTRAR", bgcolor="red", color="white", width=350, height=50, on_click=intentar_login_bloqueo), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
-    
-    v_login_receptor = ft.Container(content=ft.Row([ft.Column([ft.Text("ACCESO AL SERVIDOR", size=40, weight="bold"), user_input_receptor, pass_input_receptor, ft.ElevatedButton("ENTRAR", bgcolor="purple", color="white", width=350, height=50, on_click=intentar_login_receptor), ft.TextButton("VOLVER", on_click=ir_a_mesas)], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], alignment=ft.MainAxisAlignment.CENTER), visible=False, expand=True, bgcolor="white")
-
-    v_modo_receptor = ft.Container(content=ft.Column([ft.Row([ft.Text("MODO RECEPTOR DE REPORTES", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"), ft.Divider(), ft.Row([btn_toggle_servidor, ft.Container(width=20), txt_estado_servidor], alignment="center", vertical_alignment=ft.CrossAxisAlignment.CENTER), ft.Divider(), ft.Text("Registro de Actividad (Log):", weight="bold"), ft.Container(content=log_servidor, expand=True, bgcolor="black", padding=15, border_radius=10)]), visible=False, expand=True, padding=30, bgcolor="white")
+    v_login_bloqueo = ft.Container(
+        content=ft.Row([
+            ft.Column([
+                ft.Text("ACCESO A CONFIGURACIÓN", size=40, weight="bold"), 
+                user_input_bloqueo, pass_input_bloqueo, 
+                ft.ElevatedButton("ENTRAR", bgcolor="red", color="white", width=350, height=50, on_click=intentar_login_bloqueo), 
+                ft.TextButton("VOLVER", on_click=ir_a_mesas)
+            ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+        ], alignment=ft.MainAxisAlignment.CENTER), 
+        expand=True, bgcolor="white"
+    )
 
     v_admin = ft.Container(
         content=ft.Column([
@@ -1439,7 +1259,7 @@ def main(page: ft.Page):
                             ft.ElevatedButton("ESTADÍSTICAS", bgcolor="purple", color="white", on_click=ir_a_estadisticas),
                             ft.ElevatedButton("CAMBIAR CONTRASEÑA", on_click=ir_a_credenciales),
                             ft.ElevatedButton("PRODUCTOS", bgcolor="blue", color="white", on_click=ir_a_gestion_menu),
-                            ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', True), page.update()]),
+                            ft.ElevatedButton("CIERRE", bgcolor="orange", color="white", on_click=lambda _: abrir_modal(v_confirm_cierre)),
                             ft.ElevatedButton("CONFIG. CORREO", bgcolor="orange", color="white", on_click=lambda _: [setattr(dlg_config_correo, 'open', True), page.update()]),
                             ft.TextButton("SALIR", on_click=ir_a_mesas),
                         ],
@@ -1449,7 +1269,7 @@ def main(page: ft.Page):
             ),
             ft.Divider(), ft.Row([txt_config_tablet_id, ft.ElevatedButton("GUARDAR ID", on_click=validar_y_guardar_id)], alignment="center"),
             ft.Divider(), col_reportes_dia, ft.Divider(), ft.Row([txt_ingreso_total_dia], alignment="center", wrap=True),
-        ]), visible=False, expand=True, padding=30, bgcolor="white"
+        ]), expand=True, padding=30, bgcolor="white"
     )
 
     v_estadisticas = ft.Container(
@@ -1460,21 +1280,34 @@ def main(page: ft.Page):
                 ft.Container(content=ft.Column([ft.Text("INGRESOS POR MÉTODO", size=20, weight="bold"), col_grafica_dinero], horizontal_alignment="center"), expand=1, padding=20, border_radius=10, bgcolor="#F5F5F5"),
                 ft.Container(content=ft.Column([ft.Text("TOP PRODUCTOS VENDIDOS", size=20, weight="bold"), col_lista_top]), expand=1, padding=20, border_radius=10, bgcolor="#F5F5F5")
             ], expand=True, alignment="start", vertical_alignment=ft.CrossAxisAlignment.START)
-        ]), visible=False, expand=True, padding=30, bgcolor="white"
+        ]), expand=True, padding=30, bgcolor="white"
     )
 
-    v_gestion_menu = ft.Container(content=ft.Column([ft.Row([ft.Text("GESTIONAR PRODUCTOS", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin), txt_mensaje_error_gestion]), ft.Row([txt_nom, txt_pre, dd_cat, col_btns_cat, dd_dest, col_btns_dest, ft.ElevatedButton("AÑADIR", on_click=intentar_agregar_producto, bgcolor="green", color="white", height=62)], vertical_alignment=ft.CrossAxisAlignment.CENTER), ft.Divider(), col_lista_prods]), visible=False, expand=True, padding=30, bgcolor="white")
+    v_gestion_menu = ft.Container(content=ft.Column([ft.Row([ft.Text("GESTIONAR PRODUCTOS", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin), txt_mensaje_error_gestion]), ft.Row([txt_nom, txt_pre, dd_cat, col_btns_cat, dd_dest, col_btns_dest, ft.ElevatedButton("AÑADIR", on_click=intentar_agregar_producto, bgcolor="green", color="white", height=62)], vertical_alignment=ft.CrossAxisAlignment.CENTER), ft.Divider(), col_lista_prods]), expand=True, padding=30, bgcolor="white")
     
-    v_credenciales = ft.Container(content=ft.Column([ft.Row([ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Column([txt_nuevo_usr, txt_nuevo_pwd, ft.ElevatedButton("GUARDAR CAMBIOS", on_click=guardar_nuevas_credenciales, bgcolor="green", color="white", width=350, height=50), txt_mensaje_credenciales], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), visible=False, expand=True, padding=30, bgcolor="white")
+    v_credenciales = ft.Container(content=ft.Column([ft.Row([ft.Text("ACTUALIZAR CREDENCIALES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Column([txt_nuevo_usr, txt_nuevo_pwd, ft.ElevatedButton("GUARDAR CAMBIOS", on_click=guardar_nuevas_credenciales, bgcolor="green", color="white", width=350, height=50), txt_mensaje_credenciales], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), expand=True, padding=30, bgcolor="white")
     
-    columna_izquierda_reportes = ft.Column([txt_ip_pc, ft.ElevatedButton("GUARDAR IP DESTINO", on_click=guardar_ip_pc_en_cache), ft.Divider(), ft.Text("Lista de Archivos Locales:", weight="bold", size=18), col_lista_archivos], width=320, expand=False)
-    columna_derecha_reportes = ft.Column([ft.Row([btn_enviar_pc, btn_exportar_local, btn_eliminar_reporte], alignment="center"), ft.Divider(), contenedor_tabla_excel], expand=True)
+    columna_izquierda_reportes = ft.Column([ft.Text("Lista de Archivos Locales:", weight="bold", size=18), ft.Divider(), col_lista_archivos], width=300, expand=False)
+    columna_derecha_reportes = ft.Column([ft.Row([btn_eliminar_reporte], alignment="end"), ft.Divider(), contenedor_tabla_excel], expand=True)
 
-    v_visor_reportes = ft.Container(content=ft.Column([ft.Row([ft.Text("ADMINISTRACIÓN DE REPORTES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Row([columna_izquierda_reportes, ft.VerticalDivider(), columna_derecha_reportes], expand=True, vertical_alignment=ft.CrossAxisAlignment.START)]), visible=False, expand=True, padding=30, bgcolor="white")
+    v_visor_reportes = ft.Container(content=ft.Column([ft.Row([ft.Text("ADMINISTRACIÓN DE REPORTES", size=30, weight="bold"), ft.ElevatedButton("VOLVER", on_click=ir_a_admin)]), ft.Divider(), ft.Row([columna_izquierda_reportes, ft.VerticalDivider(), columna_derecha_reportes], expand=True, vertical_alignment=ft.CrossAxisAlignment.START)]), expand=True, padding=30, bgcolor="white")
     
-    v_bloqueo_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("CONFIGURACIÓN DE MESAS", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"), ft.Row([txt_config_num_mesas, txt_ip_barra, txt_ip_cocina, ft.ElevatedButton("GUARDAR AJUSTES", bgcolor="blue", color="white", on_click=guardar_ajustes_salon), ft.ElevatedButton("CAMBIAR LOGO", bgcolor="purple", color="white", on_click=lambda _: [setattr(txt_logo_url, 'value', ''), setattr(txt_estado_descarga, 'value', ''), setattr(dlg_logo, 'open', True), page.update()]), ft.ElevatedButton("BORRAR LOGO", bgcolor="red", color="white", on_click=borrar_logo)], scroll="auto"), ft.Text("Toca una mesa para cambiar su estado. Verde = Libre | Rojo = Bloqueada", color="grey"), ft.Divider(), grid_bloqueo]), visible=False, expand=True, padding=30, bgcolor="white")
+    v_bloqueo_mesas = ft.Container(content=ft.Column([ft.Row([ft.Text("CONFIGURACIÓN DE MESAS", size=30, weight="bold"), ft.ElevatedButton("VOLVER AL SALÓN", on_click=ir_a_mesas)], alignment="spaceBetween"), ft.Row([txt_config_num_mesas, txt_ip_barra, txt_ip_cocina, ft.ElevatedButton("GUARDAR AJUSTES", bgcolor="blue", color="white", on_click=guardar_ajustes_salon), ft.ElevatedButton("CAMBIAR LOGO", bgcolor="purple", color="white", on_click=lambda _: [setattr(txt_logo_url, 'value', ''), setattr(txt_estado_descarga, 'value', ''), setattr(dlg_logo, 'open', True), page.update()]), ft.ElevatedButton("BORRAR LOGO", bgcolor="red", color="white", on_click=borrar_logo)], scroll="auto"), ft.Text("Toca una mesa para cambiar su estado. Verde = Libre | Rojo = Bloqueada", color="grey"), ft.Divider(), grid_bloqueo]), expand=True, padding=30, bgcolor="white")
     
-    v_mesas = ft.Container(content=ft.Column([ft.Row([txt_nombre_negocio, ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), ft.ElevatedButton("RECIBIR CORTES", bgcolor="purple", color="white", on_click=ir_a_login_receptor), ft.Container(expand=True), ft.TextButton("ADMIN", on_click=lambda _: [ocultar_todo(), setattr(v_login, 'visible', True), page.update()])]), grid_mesas]), expand=True, padding=20, bgcolor="white")
+    v_mesas = ft.Container(
+        content=ft.Column([
+            ft.Row([
+                txt_nombre_negocio, 
+                ft.ElevatedButton("CONFIGURACIÓN DE MESAS", bgcolor="red", color="white", on_click=ir_a_login_bloqueo), 
+                ft.Container(expand=True), 
+                ft.TextButton("ADMIN", on_click=lambda _: cambiar_vista(v_login))
+            ]), 
+            grid_mesas
+        ]), 
+        expand=True, 
+        padding=20, 
+        bgcolor="white"
+    )
     
     btn_preticket = ft.ElevatedButton(
         "📄 PRE-TICKET", 
@@ -1518,47 +1351,118 @@ def main(page: ft.Page):
             )
         ]),
         expand=True,
-        visible=False,
         bgcolor="white"
     )
     
-    v_confirmacion = ft.Container(content=ft.Row([ft.Column([ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"), ft.Row([ft.ElevatedButton("SÍ, PAGAR", bgcolor="green", color="white", on_click=lambda _: [col_resumen_final.controls.clear(), [col_resumen_final.controls.append(ft.Text(f"{i['q']}x {i['n']} ... ${i['p']*i['q']}")) for i in cuentas[estado['mesa']]], setattr(v_ticket_final, 'visible', True), setattr(v_confirmacion, 'visible', False), setattr(columna_botones_acciones, 'visible', False), page.update()], width=180, height=60), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirmacion, 'visible', False), page.update()], width=180, height=60)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="rgba(255,255,255,0.95)")
+    v_confirmacion = ft.Container(
+        content=ft.Row([
+            ft.Column([
+                ft.Text("¿CONFIRMAR PAGO?", size=25, weight="bold"), 
+                ft.Row([
+                    ft.ElevatedButton(
+                        "SÍ, PAGAR", 
+                        bgcolor="green", 
+                        color="white", 
+                        on_click=lambda _: [
+                            col_resumen_final.controls.clear(),
+                            [col_resumen_final.controls.append(ft.Text(f"{i['q']}x {i['n']} ... ${i['p']*i['q']}")) for i in cuentas[estado['mesa']]],
+                            setattr(columna_botones_acciones, 'visible', False),
+                            cambiar_vista(v_ticket_final)
+                        ], 
+                        width=180, 
+                        height=60
+                    ), 
+                    ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: cerrar_modal(), width=180, height=60)
+                ], alignment="center")
+            ], alignment="center", horizontal_alignment="center")
+        ], alignment="center"), 
+        expand=True, 
+        bgcolor="rgba(255,255,255,0.9)"
+    )
     
     col_resumen_final = ft.Column(scroll="always", expand=True)
 
     v_ticket_final = ft.Container(
         content=ft.Column([
-            ft.Row([ft.TextButton("<- VOLVER A LA MESA", on_click=lambda _: [ocultar_todo(), setattr(v_pedido, 'visible', True), setattr(columna_botones_acciones, 'visible', True), page.update()])]),
-            ft.Text("TICKET", size=30, weight="bold"), col_resumen_final, ft.ElevatedButton("FINALIZAR", bgcolor="blue", color="white", width=400, height=80, on_click=lambda _: [ocultar_todo(), setattr(v_pago_metodo, 'visible', True), page.update()])
-        ], horizontal_alignment="center"), bgcolor="white", visible=False, expand=True, padding=50
+            ft.Row([ft.TextButton("<- VOLVER A LA MESA", on_click=lambda _: cambiar_vista(v_pedido))]),
+            ft.Text("TICKET", size=30, weight="bold"), col_resumen_final, 
+            ft.ElevatedButton("FINALIZAR", bgcolor="blue", color="white", width=400, height=80, on_click=lambda _: cambiar_vista(v_pago_metodo))
+        ], horizontal_alignment="center"), 
+        bgcolor="white", expand=True, padding=50
     )
     
     v_pago_metodo = ft.Container(
         content=ft.Row([
             ft.Column([
-                ft.Row([ft.TextButton("<- VOLVER AL TICKET", on_click=lambda _: [ocultar_todo(), setattr(v_ticket_final, 'visible', True), page.update()])]),
+                ft.Row([ft.TextButton("<- VOLVER AL TICKET", on_click=lambda _: cambiar_vista(v_ticket_final))]),
                 ft.Text("MÉTODO DE PAGO", size=30, weight="bold"), 
                 ft.ElevatedButton("EFECTIVO", bgcolor="green", color="white", width=400, height=70, on_click=lambda _: finalizar_pago_total("Efectivo")), 
                 ft.ElevatedButton("TARJETA", bgcolor="blue", color="white", width=400, height=70, on_click=lambda _: finalizar_pago_total("Tarjeta")), 
                 ft.ElevatedButton("AMBAS (Mixto)", bgcolor="orange", color="white", width=400, height=70, on_click=ir_a_pago_mixto)
             ], alignment="center", horizontal_alignment="center")
-        ], alignment="center"), visible=False, expand=True, bgcolor="white"
+        ], alignment="center"), 
+        expand=True, bgcolor="white"
     )
     
-    v_pago_mixto = ft.Container(content=ft.Row([ft.Column([ft.Text("PAGO DIVIDIDO", size=30, weight="bold"), txt_mixto_total, ft.Divider(), ft.Row([txt_mixto_efectivo, ft.Text("+", size=30, weight="bold"), txt_mixto_tarjeta], alignment="center"), txt_mixto_error, ft.Divider(), ft.ElevatedButton("CONFIRMAR PAGO", bgcolor="green", color="white", width=400, height=60, on_click=confirmar_pago_mixto), ft.ElevatedButton("CANCELAR", bgcolor="red", color="white", width=400, height=60, on_click=lambda _: [setattr(v_pago_mixto, 'visible', False), setattr(v_pago_metodo, 'visible', True), page.update()])], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="white")
+    v_pago_mixto = ft.Container(
+        content=ft.Row([
+            ft.Column([
+                ft.Text("PAGO DIVIDIDO", size=30, weight="bold"), 
+                txt_mixto_total, ft.Divider(), 
+                ft.Row([txt_mixto_efectivo, ft.Text("+", size=30, weight="bold"), txt_mixto_tarjeta], alignment="center"), 
+                txt_mixto_error, ft.Divider(), 
+                ft.ElevatedButton("CONFIRMAR PAGO", bgcolor="green", color="white", width=400, height=60, on_click=confirmar_pago_mixto), 
+                ft.ElevatedButton("CANCELAR", bgcolor="red", color="white", width=400, height=60, on_click=lambda _: cambiar_vista(v_pago_metodo))
+            ], alignment="center", horizontal_alignment="center")
+        ], alignment="center"), 
+        expand=True, bgcolor="white"
+    )
     
-    v_pago_finalizado = ft.Container(content=ft.Row([ft.Column([ft.Text("GRACIAS", size=40, weight="bold"), txt_mensaje_despedida := ft.Text("", size=22, text_align="center"), ft.ElevatedButton("CERRAR", bgcolor="blue", color="white", width=350, height=60, on_click=ir_a_mesas), ft.ElevatedButton("🖨️ IMPRIMIR TICKET", bgcolor="orange", color="white", width=350, height=60, on_click=accion_imprimir_ticket_final)], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="white")
+    v_pago_finalizado = ft.Container(
+        content=ft.Row([
+            ft.Column([
+                ft.Text("GRACIAS", size=40, weight="bold"), 
+                txt_mensaje_despedida := ft.Text("", size=22, text_align="center"), 
+                ft.ElevatedButton("CERRAR", bgcolor="blue", color="white", width=350, height=60, on_click=ir_a_mesas), 
+                ft.ElevatedButton("🖨️ IMPRIMIR TICKET", bgcolor="orange", color="white", width=350, height=60, on_click=accion_imprimir_ticket_final)
+            ], alignment="center", horizontal_alignment="center")
+        ], alignment="center"), 
+        expand=True, bgcolor="white"
+    )
     
-    v_confirm_cierre = ft.Container(content=ft.Row([ft.Column([ft.Text("¡ADVERTENCIA!", size=30, weight="bold", color="red"), ft.Text("Se resetearán los ingresos y se generará el Excel."), ft.Row([ft.ElevatedButton("SÍ", bgcolor="green", color="white", on_click=ejecutar_cierre_final, width=150), ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: [setattr(v_confirm_cierre, 'visible', False), page.update()], width=150)], alignment="center")], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="rgba(255,255,255,0.95)")
-    v_resumen_cierre = ft.Container(content=ft.Row([ft.Column([ft.Text("RESUMEN CIERRE", size=30, weight="bold"), txt_resumen_cierre_total := ft.Text("", size=30, color="green", weight="bold"), txt_resumen_efectivo := ft.Text(""), txt_resumen_tarjeta := ft.Text(""), txt_resumen_cierre_fecha := ft.Text("", size=18, weight="bold"), ft.ElevatedButton("CERRAR", on_click=ir_a_admin)], alignment="center", horizontal_alignment="center")], alignment="center"), visible=False, expand=True, bgcolor="white")
+    v_confirm_cierre = ft.Container(
+        content=ft.Row([
+            ft.Column([
+                ft.Text("¡ADVERTENCIA!", size=30, weight="bold", color="red"), 
+                ft.Text("Se resetearán los ingresos y se generará el Excel."), 
+                ft.Row([
+                    ft.ElevatedButton("SÍ", bgcolor="green", color="white", on_click=ejecutar_cierre_final, width=150), 
+                    ft.ElevatedButton("NO", bgcolor="red", color="white", on_click=lambda _: cerrar_modal(), width=150)
+                ], alignment="center")
+            ], alignment="center", horizontal_alignment="center")
+        ], alignment="center"), 
+        expand=True, 
+        bgcolor="rgba(255,255,255,0.95)"
+    )
+    
+    v_resumen_cierre = ft.Container(
+        content=ft.Row([
+            ft.Column([
+                ft.Text("RESUMEN CIERRE", size=30, weight="bold"), 
+                txt_resumen_cierre_total := ft.Text("", size=30, color="green", weight="bold"), 
+                txt_resumen_efectivo := ft.Text(""), 
+                txt_resumen_tarjeta := ft.Text(""), 
+                txt_resumen_cierre_fecha := ft.Text("", size=18, weight="bold"), 
+                ft.ElevatedButton("CERRAR", on_click=ir_a_admin)
+            ], alignment="center", horizontal_alignment="center")
+        ], alignment="center"), 
+        expand=True, bgcolor="white"
+    )
 
-    page.add(ft.Stack([
-        v_mesas, v_pedido, v_login, v_login_bloqueo, v_login_receptor, v_admin, v_confirmacion, v_ticket_final, 
-        v_confirm_cierre, v_resumen_cierre, v_pago_metodo, v_pago_mixto, v_pago_finalizado, 
-        v_gestion_menu, v_credenciales, v_visor_reportes, v_bloqueo_mesas, v_modo_receptor, v_estadisticas
-    ], expand=True))
+    # --- MONTAJE LIGERO EN PÁGINA ---
+    page.add(ft.Stack([contenedor_principal, contenedor_modal], expand=True))
     
-    # Carga inicial optimizada
+    # Llena las categorías en memoria y monta el salón como vista inicial
     actualizar_botones_categorias_menu()
     ir_a_mesas(None)
 
