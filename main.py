@@ -852,6 +852,9 @@ def main(page: ft.Page):
         texto = texto.replace('ñ', 'n').replace('Ñ', 'N')
         return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
 
+    # =======================================================
+    # ORDEN PARA COMANDA (ACTUALIZADA: NOMBRE Y FECHA COMPLETA)
+    # =======================================================
     def enviar_ticket_red(ip, destino, items, mesa, tipo_orden):
         if not items: return
         
@@ -863,16 +866,21 @@ def main(page: ft.Page):
         CUT = b'\x1D\x56\x00'       
         LF = b'\x0A'                
         
+        nombre_negocio = db.db_obtener_nombre_negocio().upper()
+        nombre_bytes = limpiar_texto(nombre_negocio).encode('ascii', errors='ignore')
+
         ticket = INIT
         ticket += CENTER + BOLD_ON
         ticket += f"=== ORDEN PARA {destino} ===\n".encode('ascii', errors='ignore')
+        ticket += nombre_bytes + b"\n"
+        ticket += BOLD_OFF
         
         tipo_limpio = limpiar_texto(tipo_orden)
         ticket += f">> {tipo_limpio} <<\n".encode('ascii', errors='ignore')
         
         ticket += f"MESA: {mesa}\n".encode('ascii', errors='ignore')
-        ticket += f"FECHA: {datetime.now().strftime('%H:%M:%S')}\n".encode('ascii', errors='ignore')
-        ticket += BOLD_OFF + LEFT
+        ticket += f"FECHA: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n".encode('ascii', errors='ignore')
+        ticket += LEFT
         ticket += ("-" * 32 + "\n").encode('ascii', errors='ignore')
         
         for it in items:
@@ -1462,7 +1470,6 @@ def main(page: ft.Page):
     # --- MONTAJE LIGERO EN PÁGINA ---
     page.add(ft.Stack([contenedor_principal, contenedor_modal], expand=True))
     
-    # Llena las categorías en memoria y monta el salón como vista inicial
     actualizar_botones_categorias_menu()
     ir_a_mesas(None)
 
